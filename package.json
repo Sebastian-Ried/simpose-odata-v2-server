@@ -25,8 +25,12 @@
     "api",
     "sap"
   ],
-  "author": "",
+  "author": "Sebastian Ried",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sebastian-Ried/simpose-odata-v2-server.git"
+  },
   "dependencies": {
     "xmlbuilder2": "^3.1.1"
   },

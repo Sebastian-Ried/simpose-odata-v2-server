@@ -599,6 +599,37 @@ npm run lint
 
 ---
 
+## Notable Implementation Details
+
+### Navigation Property Column Name Resolution
+
+When filtering through navigation properties (e.g. `$filter=batch/fruitTypeId eq '...'`), the filter translator generates Sequelize's `$assoc.col$` syntax. However, Sequelize uses the literal string in the SQL WHERE clause, which fails when the model attribute name (camelCase) differs from the database column name (snake_case).
+
+The `resolveColumnPath()` function in `src/query/filter-translator.ts` solves this by:
+1. Walking the navigation path through the OData schema to find the target entity
+2. Looking up the Sequelize model name from the entity definition
+3. Checking `rawAttributes` on the model to find the `field` mapping
+4. Replacing the attribute name with the actual DB column name
+
+This is transparent to consumers — `$filter=batch/fruitTypeId eq '...'` just works, regardless of whether the DB column is `fruitTypeId` or `fruit_type_id`.
+
+### Association Auto-Include
+
+When a filter or `$orderby` references a navigation property, the query builder automatically adds a minimal `include` for that association — even without an explicit `$expand`. This prevents "missing FROM-clause entry" SQL errors. The logic is in `ensureFilterIncludes()` in `src/query/query-builder.ts`, which:
+1. Scans the WHERE clause for `$assoc.col$` patterns
+2. Extracts association names
+3. Adds `{ model, as, attributes: [], required: false }` includes
+4. Sets `subQuery: false` to ensure JOINs appear in the main query
+
+### ETag Handling
+
+- **Generation**: ETags are based on `updatedAt`/`createdAt` timestamps using SHA-256
+- **Response header**: Single entity reads include the ETag in the response header
+- **$select guard**: ETags are NOT generated for partial entities (with `$select`) because the ETag would differ from the full entity's ETag, causing spurious `412 Precondition Failed` on subsequent updates
+- **Concurrency**: `If-Match` header validation in update/delete handlers enables optimistic concurrency control
+
+---
+
 ## Questions?
 
 If you have questions about specific components, check:
