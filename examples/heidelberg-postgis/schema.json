@@ -1,0 +1,98 @@
+{
+  "namespace": "HeidelbergPostGISService",
+  "containerName": "HeidelbergPostGISContainer",
+
+  "entities": {
+    "HeidelbergPlace": {
+      "keys": ["ID"],
+      "properties": {
+        "ID": {
+          "type": "Edm.Int32",
+          "nullable": false
+        },
+        "Name": {
+          "type": "Edm.String",
+          "maxLength": 100,
+          "nullable": false
+        },
+        "Description": {
+          "type": "Edm.String"
+        },
+        "Category": {
+          "type": "Edm.String",
+          "maxLength": 50,
+          "nullable": false
+        },
+        "Address": {
+          "type": "Edm.String",
+          "maxLength": 200
+        },
+        "Latitude": {
+          "type": "Edm.Double"
+        },
+        "Longitude": {
+          "type": "Edm.Double"
+        },
+        "OpeningHours": {
+          "type": "Edm.String",
+          "maxLength": 100
+        },
+        "EntryFee": {
+          "type": "Edm.Decimal",
+          "precision": 6,
+          "scale": 2
+        },
+        "Website": {
+          "type": "Edm.String",
+          "maxLength": 200
+        },
+        "Rating": {
+          "type": "Edm.Decimal",
+          "precision": 2,
+          "scale": 1
+        },
+        "IsAccessible": {
+          "type": "Edm.Boolean",
+          "nullable": false
+        },
+        "CreatedAt": {
+          "type": "Edm.DateTime"
+        },
+        "UpdatedAt": {
+          "type": "Edm.DateTime"
+        }
+      }
+    }
+  },
+
+  "functionImports": {
+    "GetPlacesByCategory": {
+      "returnType": "Collection(HeidelbergPlace)",
+      "httpMethod": "GET",
+      "parameters": {
+        "category": { "type": "Edm.String" }
+      }
+    },
+    "GetTopRatedPlaces": {
+      "returnType": "Collection(HeidelbergPlace)",
+      "httpMethod": "GET",
+      "parameters": {
+        "count": { "type": "Edm.Int32" }
+      }
+    },
+    "GetFreePlaces": {
+      "returnType": "Collection(HeidelbergPlace)",
+      "httpMethod": "GET",
+      "parameters": {}
+    },
+    "GetPlacesNearby": {
+      "returnType": "Collection(HeidelbergPlace)",
+      "httpMethod": "GET",
+      "parameters": {
+        "lat": { "type": "Edm.Double" },
+        "lon": { "type": "Edm.Double" },
+        "radiusMeters": { "type": "Edm.Int32" }
+      }
+    }
+  }
+}

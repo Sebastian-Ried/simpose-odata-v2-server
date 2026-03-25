@@ -1,0 +1,267 @@
+import { Request, Response, NextFunction, Router } from 'express';
+import { Sequelize } from 'sequelize';
+
+/**
+ * Health check status
+ */
+export interface HealthStatus {
+  status: 'healthy' | 'unhealthy' | 'degraded';
+  timestamp: string;
+  uptime: number;
+  checks: {
+    database?: {
+      status: 'up' | 'down';
+      latency?: number;
+      error?: string;
+    };
+    [key: string]: {
+      status: 'up' | 'down';
+      latency?: number;
+      error?: string;
+    } | undefined;
+  };
+}
+
+/**
+ * Readiness check status
+ */
+export interface ReadinessStatus {
+  ready: boolean;
+  timestamp: string;
+  checks: {
+    database?: {
+      ready: boolean;
+      error?: string;
+    };
+    [key: string]: {
+      ready: boolean;
+      error?: string;
+    } | undefined;
+  };
+}
+
+/**
+ * Liveness check status (simple alive check)
+ */
+export interface LivenessStatus {
+  alive: boolean;
+  timestamp: string;
+}
+
+/**
+ * Options for health check configuration
+ */
+export interface HealthCheckOptions {
+  /** Sequelize instance for database health checks */
+  sequelize?: Sequelize;
+  /** Custom health check functions */
+  customChecks?: Record<string, () => Promise<{ status: 'up' | 'down'; latency?: number; error?: string }>>;
+  /** Timeout for database health check in ms (default: 5000) */
+  dbCheckTimeout?: number;
+  /** Whether the service is ready to accept traffic (can be set externally) */
+  isReady?: () => boolean;
+}
+
+/** Start time for uptime calculation */
+const startTime = Date.now();
+
+/**
+ * Check database connectivity with timeout.
+ */
+async function checkDatabase(
+  sequelize: Sequelize,
+  timeout: number
+): Promise<{ status: 'up' | 'down'; latency?: number; error?: string }> {
+  const start = Date.now();
+
+  try {
+    // Race between the query and a timeout, ensuring timer cleanup
+    let timeoutId: NodeJS.Timeout;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('Database check timeout')), timeout);
+    });
+
+    await Promise.race([
+      sequelize.authenticate().finally(() => clearTimeout(timeoutId)),
+      timeoutPromise,
+    ]);
+
+    return {
+      status: 'up',
+      latency: Date.now() - start,
+    };
+  } catch (error) {
+    return {
+      status: 'down',
+      latency: Date.now() - start,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Create a health check handler.
+ *
+ * Returns detailed health information including database connectivity
+ * and custom health checks. Suitable for monitoring systems.
+ *
+ * @param options - Health check configuration
+ * @returns Express request handler
+ *
+ * @example
+ * ```typescript
+ * app.get('/health', createHealthHandler({ sequelize }));
+ * ```
+ */
+export function createHealthHandler(options: HealthCheckOptions = {}) {
+  const { sequelize, customChecks = {}, dbCheckTimeout = 5000 } = options;
+
+  return async (req: Request, res: Response): Promise<void> => {
+    const checks: HealthStatus['checks'] = {};
+    let overallStatus: HealthStatus['status'] = 'healthy';
+
+    // Database check
+    if (sequelize) {
+      const dbResult = await checkDatabase(sequelize, dbCheckTimeout);
+      checks.database = dbResult;
+      if (dbResult.status === 'down') {
+        overallStatus = 'unhealthy';
+      }
+    }
+
+    // Custom checks
+    for (const [name, checkFn] of Object.entries(customChecks)) {
+      try {
+        const result = await checkFn();
+        checks[name] = result;
+        if (result.status === 'down') {
+          overallStatus = overallStatus === 'healthy' ? 'degraded' : overallStatus;
+        }
+      } catch (error) {
+        checks[name] = {
+          status: 'down',
+          error: error instanceof Error ? error.message : 'Check failed',
+        };
+        overallStatus = overallStatus === 'healthy' ? 'degraded' : overallStatus;
+      }
+    }
+
+    const response: HealthStatus = {
+      status: overallStatus,
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor((Date.now() - startTime) / 1000),
+      checks,
+    };
+
+    const statusCode = overallStatus === 'healthy' ? 200 : overallStatus === 'degraded' ? 200 : 503;
+    res.status(statusCode).json(response);
+  };
+}
+
+/**
+ * Create a readiness check handler.
+ *
+ * Indicates whether the service is ready to accept traffic.
+ * Used by Kubernetes readiness probes to determine if traffic
+ * should be routed to this instance.
+ *
+ * @param options - Health check configuration
+ * @returns Express request handler
+ *
+ * @example
+ * ```typescript
+ * app.get('/ready', createReadinessHandler({ sequelize }));
+ * ```
+ */
+export function createReadinessHandler(options: HealthCheckOptions = {}) {
+  const { sequelize, isReady, dbCheckTimeout = 5000 } = options;
+
+  return async (req: Request, res: Response): Promise<void> => {
+    const checks: ReadinessStatus['checks'] = {};
+    let ready = true;
+
+    // External readiness flag
+    if (isReady && !isReady()) {
+      ready = false;
+    }
+
+    // Database check
+    if (sequelize) {
+      const dbResult = await checkDatabase(sequelize, dbCheckTimeout);
+      checks.database = {
+        ready: dbResult.status === 'up',
+        error: dbResult.error,
+      };
+      if (dbResult.status === 'down') {
+        ready = false;
+      }
+    }
+
+    const response: ReadinessStatus = {
+      ready,
+      timestamp: new Date().toISOString(),
+      checks,
+    };
+
+    res.status(ready ? 200 : 503).json(response);
+  };
+}
+
+/**
+ * Create a liveness check handler.
+ *
+ * Simple check that the process is alive and responding.
+ * Used by Kubernetes liveness probes to determine if the
+ * container should be restarted.
+ *
+ * This is intentionally simple - it should always return 200
+ * unless the process is completely unresponsive.
+ *
+ * @returns Express request handler
+ *
+ * @example
+ * ```typescript
+ * app.get('/live', createLivenessHandler());
+ * ```
+ */
+export function createLivenessHandler() {
+  return (req: Request, res: Response): void => {
+    const response: LivenessStatus = {
+      alive: true,
+      timestamp: new Date().toISOString(),
+    };
+    res.status(200).json(response);
+  };
+}
+
+/**
+ * Create a router with all health check endpoints.
+ *
+ * Provides three endpoints:
+ * - GET /health - Detailed health status with all checks
+ * - GET /ready - Readiness probe for traffic routing
+ * - GET /live - Liveness probe for container health
+ *
+ * @param options - Health check configuration
+ * @returns Express Router with health endpoints
+ *
+ * @example
+ * ```typescript
+ * import { createHealthRouter } from 'odata-v2-sequelize';
+ *
+ * // Mount at root level (outside OData middleware)
+ * app.use(createHealthRouter({ sequelize }));
+ *
+ * // Or mount at specific path
+ * app.use('/api', createHealthRouter({ sequelize }));
+ * ```
+ */
+export function createHealthRouter(options: HealthCheckOptions = {}): Router {
+  const router = Router();
+
+  router.get('/health', createHealthHandler(options));
+  router.get('/ready', createReadinessHandler(options));
+  router.get('/live', createLivenessHandler());
+
+  return router;
+}
