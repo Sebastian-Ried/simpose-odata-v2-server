@@ -29,7 +29,7 @@ export function parseUri(
     throw new Error(`URI path exceeds maximum length`);
   }
 
-  const parts = normalizedPath.split('/');
+  const parts = splitPathSegments(normalizedPath);
 
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i]!;
@@ -256,6 +256,55 @@ function splitKeyPairs(keyString: string): string[] {
   }
 
   return pairs;
+}
+
+/**
+ * Split URI path on '/' while respecting parenthesized key segments.
+ * Keys may contain decoded '/' characters (e.g. from Express req.path),
+ * so we must not split inside parentheses.
+ */
+function splitPathSegments(path: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let depth = 0;
+
+  for (let i = 0; i < path.length; i++) {
+    const char = path[i]!;
+
+    if (char === '(' && depth === 0) {
+      depth++;
+      current += char;
+    } else if (char === ')' && depth > 0) {
+      depth--;
+      current += char;
+    } else if (char === "'" && depth > 0) {
+      // Skip quoted strings inside keys (handle escaped '' too)
+      current += char;
+      i++;
+      while (i < path.length) {
+        const c = path[i]!;
+        current += c;
+        if (c === "'" && path[i + 1] === "'") {
+          current += path[i + 1]!;
+          i++;
+        } else if (c === "'") {
+          break;
+        }
+        i++;
+      }
+    } else if (char === '/' && depth === 0) {
+      parts.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  if (current) {
+    parts.push(current);
+  }
+
+  return parts;
 }
 
 /**
