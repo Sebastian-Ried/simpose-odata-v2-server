@@ -275,7 +275,8 @@ function formatKeyValue(value, edmType) {
         return 'null';
     }
     if (edmType === 'Edm.String' || edmType === 'Edm.Guid') {
-        return `'${String(value).replace(/'/g, "''")}'`;
+        const encoded = encodeURIComponent(String(value)).replace(/%27/gi, "''").replace(/'/g, "''");
+        return `'${encoded}'`;
     }
     return String(value);
 }
