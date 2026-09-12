@@ -1276,8 +1276,24 @@ interface HookContext {
   user?: any;                 // User from auth middleware
   keys?: Record<string, any>; // Entity keys (for single-entity ops)
   data: Record<string, any>;  // Custom data store between hooks
+  transaction?: Transaction;  // Real transaction spanning create/update + its afterX hook (v1.1.0+) — see "Transactions" below
+  correlationId?: string;     // Per-request correlation id, if the consumer sets one on req
+  logger?: Logger;            // Per-request logger, if the consumer sets one on req
 }
 ```
+
+### Transactions (v1.1.0+)
+
+A standalone POST/PUT/PATCH request opens a real transaction and exposes it as `ctx.transaction`, spanning `beforeCreate`/`beforeUpdate` through the entity write to `afterCreate`/`afterUpdate`. It commits only once the `afterX` hook resolves, and rolls back on any error from any step in between — including one the hook itself throws. Pass it to any Sequelize call a hook makes to have that write commit or roll back atomically with the entity:
+
+```javascript
+afterUpdate: async (ctx, result) => {
+  await SomeModel.create({ ... }, { transaction: ctx.transaction });
+  return result;
+},
+```
+
+Hooks that never read `ctx.transaction` are unaffected. Note that `$batch` changesets do **not** give you multi-request atomicity — each request inside a changeset still gets its own independent transaction; a failing part stops the changeset and reports every part as failed, but it cannot undo an earlier part's already-committed write.
 
 ### Custom Handler Classes
 

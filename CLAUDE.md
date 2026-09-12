@@ -83,6 +83,31 @@ const hooks = {
 
 The `addQueryFilter(ctx, where)` function from the library adds Sequelize WHERE conditions.
 
+### Transactions (`ctx.transaction`, v1.1.0+)
+
+Standalone POST/PUT/PATCH requests each open a real Sequelize transaction and expose it as `ctx.transaction`, spanning `beforeCreate`/`beforeUpdate` → the entity write → `afterCreate`/`afterUpdate`. It commits only after the `afterX` hook resolves and rolls back on any error from any of those steps — including one thrown by the hook itself. This lets an `afterCreate`/`afterUpdate` hook write related rows (an audit/history log, a denormalized counter, etc.) that are guaranteed to commit or roll back atomically with the entity:
+
+```javascript
+const hooks = {
+  Tree: {
+    beforeUpdate: async (ctx, data) => {
+      ctx.data.before = (await ctx.models.Tree.findOne({ where: ctx.keys }))?.get({ plain: true });
+      return data;
+    },
+    afterUpdate: async (ctx, result) => {
+      // Runs inside the same transaction as the update above — throwing here
+      // rolls the Tree update back too, not just this hook's own effect.
+      await auditLog.record({ before: ctx.data.before, after: result }, ctx.transaction);
+      return result;
+    },
+  },
+};
+```
+
+Hooks that never touch `ctx.transaction` are unaffected — this is backward compatible. Before v1.1.0, `ctx.transaction` existed in the type system but nothing ever populated it for a standalone request (only the unused `handleDeepCreate` path did); a hook depending on it silently got `undefined` and no atomicity guarantee.
+
+`$batch` changesets no longer wrap themselves in an outer transaction either (that wrapper never actually reached the request handlers doing the writes — confirmed non-functional, and it would now conflict with the per-request transaction above: two real transactions on the same pooled connection). Each request inside a changeset is atomic on its own; a failing part still stops the changeset and reports every part as failed, but an earlier part's already-committed write can no longer be undone by a later failure (it never actually could, despite the response claiming a "rollback").
+
 ## Navigation Property Filtering
 
 The middleware supports `$filter=navProp/field eq value` syntax. Internally:
