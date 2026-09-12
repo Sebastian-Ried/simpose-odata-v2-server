@@ -402,6 +402,81 @@ describe('Hooks', () => {
     });
   });
 
+  describe('Transaction Atomicity (create/update wraps afterX hooks)', () => {
+    it('commits both the update and an afterUpdate side effect together', async () => {
+      let hookSawPrice: unknown;
+
+      const hooks: Record<string, EntityHooks> = {
+        Product: {
+          afterUpdate: async (ctx, result: any) => {
+            hookSawPrice = result.Price;
+            return result;
+          },
+        },
+      };
+
+      const app = createTestApp(sequelize, models, undefined, { hooks });
+      const res = await request(app, 'PATCH', '/odata/Product(1)', {
+        body: { Price: 555.55 },
+      });
+
+      expect([200, 204]).toContain(res.status);
+      expect(parseFloat(hookSawPrice as string)).toBe(555.55);
+
+      const persisted = await models.Product.findByPk(1);
+      expect(parseFloat((persisted as any).Price)).toBe(555.55);
+    });
+
+    it('rolls back the update itself when afterUpdate throws', async () => {
+      const before = await models.Product.findByPk(1);
+      const originalPrice = (before as any).Price;
+
+      const hooks: Record<string, EntityHooks> = {
+        Product: {
+          afterUpdate: async () => {
+            throw new Error('simulated failure writing a related audit row');
+          },
+        },
+      };
+
+      const app = createTestApp(sequelize, models, undefined, { hooks });
+      const res = await request(app, 'PATCH', '/odata/Product(1)', {
+        body: { Price: 1.23 },
+      });
+
+      expect(res.status).toBe(500);
+
+      // The entity's own change must not have been persisted either — the
+      // whole point of wrapping the update in a real transaction.
+      const after = await models.Product.findByPk(1);
+      expect((after as any).Price).toBe(originalPrice);
+    });
+
+    it('rolls back the create itself when afterCreate throws', async () => {
+      const countBefore = await models.Product.count();
+
+      const hooks: Record<string, EntityHooks> = {
+        Product: {
+          afterCreate: async () => {
+            throw new Error('simulated failure writing a related audit row');
+          },
+        },
+      };
+
+      const app = createTestApp(sequelize, models, undefined, { hooks });
+      const res = await request(app, 'POST', '/odata/Product', {
+        body: { Name: 'Should Not Persist', Price: 1.0 },
+      });
+
+      expect(res.status).toBe(500);
+
+      const countAfter = await models.Product.count();
+      expect(countAfter).toBe(countBefore);
+      const found = await models.Product.findOne({ where: { Name: 'Should Not Persist' } });
+      expect(found).toBeNull();
+    });
+  });
+
   describe('Hook Context Data', () => {
     it('should allow storing data in context', async () => {
       let afterReadData: any;

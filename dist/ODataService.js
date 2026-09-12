@@ -150,7 +150,7 @@ class ODataService {
                 await (0, read_1.handleRead)(req, res, handler, entityName, undefined, this.schema, query, this.basePath, this.models);
                 break;
             case 'POST':
-                await (0, create_1.handleCreate)(req, res, handler, entityName, this.schema, query, this.basePath, this.models);
+                await (0, create_1.handleCreate)(req, res, handler, entityName, this.schema, query, this.basePath, this.models, this.sequelize);
                 break;
             default:
                 throw new errors_1.ODataError(405, `Method ${req.method} not allowed on entity set`);
@@ -193,11 +193,11 @@ class ODataService {
                 await (0, read_1.handleRead)(req, res, handler, entityName, keys, this.schema, query, this.basePath, this.models);
                 break;
             case 'PUT':
-                await (0, update_1.handleUpdate)(req, res, handler, entityName, keys, this.schema, query, this.basePath, this.models);
+                await (0, update_1.handleUpdate)(req, res, handler, entityName, keys, this.schema, query, this.basePath, this.models, this.sequelize);
                 break;
             case 'PATCH':
             case 'MERGE':
-                await (0, update_1.handleMerge)(req, res, handler, entityName, keys, this.schema, query, this.basePath, this.models);
+                await (0, update_1.handleMerge)(req, res, handler, entityName, keys, this.schema, query, this.basePath, this.models, this.sequelize);
                 break;
             case 'DELETE':
                 await (0, delete_1.handleDelete)(req, res, handler, entityName, keys, this.schema, query, this.models);

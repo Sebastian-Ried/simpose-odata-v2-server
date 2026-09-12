@@ -1,6 +1,6 @@
 {
   "name": "odata-v2-sequelize",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "OData V2 compliant middleware for Express.js with Sequelize ORM integration",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

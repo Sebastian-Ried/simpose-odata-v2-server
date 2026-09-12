@@ -9,19 +9,7 @@ const uri_parser_1 = require("../../parser/uri-parser");
 /**
  * Handle OData create operations (POST requests)
  */
-async function handleCreate(req, res, handler, entityName, schema, query, basePath, models) {
-    const odataReq = req;
-    const ctx = {
-        req: req,
-        res: res,
-        query,
-        entityName,
-        models,
-        user: req.user,
-        data: {},
-        correlationId: odataReq.correlationId,
-        logger: odataReq.logger,
-    };
+async function handleCreate(req, res, handler, entityName, schema, query, basePath, models, sequelize) {
     const body = req.body;
     if (!body || typeof body !== 'object') {
         throw new errors_1.ODataError(400, 'Request body is required');
@@ -31,10 +19,29 @@ async function handleCreate(req, res, handler, entityName, schema, query, basePa
     if (entity?.readOnly) {
         throw new errors_1.ODataError(405, `${entityName} is read-only`);
     }
+    // Wrap the whole create — including afterCreate — in a real transaction, so
+    // a hook that writes related rows (e.g. an audit/history log) commits or
+    // rolls back atomically with the entity itself, rather than the entity
+    // silently persisting even when the hook after it fails.
+    const transaction = await sequelize.transaction();
     try {
+        const odataReq = req;
+        const ctx = {
+            req: req,
+            res: res,
+            query,
+            entityName,
+            models,
+            user: req.user,
+            data: {},
+            transaction,
+            correlationId: odataReq.correlationId,
+            logger: odataReq.logger,
+        };
         // Validate and transform input data
         const createData = transformInputData(body, entityName, schema);
         const result = await handler.handleCreate(ctx, createData);
+        await transaction.commit();
         // Build Location header
         const keys = extractKeys(result, entityName, schema);
         const location = (0, uri_parser_1.buildEntityUri)(basePath, entityName, keys, schema);
@@ -42,6 +49,7 @@ async function handleCreate(req, res, handler, entityName, schema, query, basePa
         res.status(201).header('Location', location).json(serialized);
     }
     catch (error) {
+        await transaction.rollback();
         if (error instanceof errors_1.ODataError) {
             throw error;
         }

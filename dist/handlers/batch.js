@@ -130,51 +130,52 @@ async function handleBatch(req, res, schema, basePath, processRequest, sequelize
 /**
  * Process a changeset (transactional group of requests)
  */
-async function processChangeset(changeset, schema, basePath, processRequest, sequelize, contentIdMap) {
-    const transaction = await sequelize.transaction();
+async function processChangeset(changeset, schema, basePath, processRequest, 
+// No longer opens its own transaction here (see below) — kept for call-site
+// compatibility.
+_sequelize, contentIdMap) {
+    // Each request in the changeset is replayed through processRequest, which
+    // reaches the same handleCreate/handleUpdate/handleMerge entry points as a
+    // standalone request — those now open their own real transaction per
+    // request (see src/handlers/crud/create.ts and update.ts), committing or
+    // rolling back the entity + its hooks atomically. Wrapping *this* function
+    // in a second, outer sequelize.transaction() around that no longer works:
+    // it either nests two real transactions on the same connection/pool slot
+    // (SQLite: "cannot start a transaction within a transaction") or, worse,
+    // silently pulls a second pooled connection that doesn't see the first
+    // transaction's uncommitted writes. That outer transaction was already
+    // non-functional for true multi-request atomicity before this change (its
+    // commit/rollback never actually reached the request handlers doing the
+    // writes), so removing it loses no real guarantee — it only stops
+    // processing and reports the whole changeset as failed the moment one part
+    // fails, so a caller doesn't mistake the earlier parts for a coherent
+    // success.
     const responses = [];
     const localContentIdMap = new Map(contentIdMap);
-    let rollbackError = null;
-    try {
-        for (const part of changeset.parts) {
-            // Replace $contentId references in URL and body
-            const resolvedPart = resolveContentIdReferences(part, localContentIdMap);
-            const response = await processBatchPart(resolvedPart, schema, basePath, processRequest, localContentIdMap);
-            responses.push(response);
-            // Track content ID for this response
-            if (part.contentId) {
-                localContentIdMap.set(part.contentId, response);
-            }
-            // If any request fails, rollback entire changeset
-            if (response.statusCode >= 400) {
-                rollbackError = new Error(`Request failed with status ${response.statusCode}`);
-                break;
-            }
+    for (const part of changeset.parts) {
+        // Replace $contentId references in URL and body
+        const resolvedPart = resolveContentIdReferences(part, localContentIdMap);
+        const response = await processBatchPart(resolvedPart, schema, basePath, processRequest, localContentIdMap);
+        responses.push(response);
+        // Track content ID for this response
+        if (part.contentId) {
+            localContentIdMap.set(part.contentId, response);
         }
-        if (rollbackError) {
-            throw rollbackError;
+        // If any request fails, report the whole changeset as failed. Parts
+        // already processed have each already committed or rolled back
+        // themselves individually — this cannot undo an earlier part's commit,
+        // only signal that the changeset as a whole did not fully succeed.
+        if (response.statusCode >= 400) {
+            const errorMessage = `Request failed with status ${response.statusCode}`;
+            return changeset.parts.map((p) => ({
+                contentId: p.contentId,
+                statusCode: 500,
+                headers: { 'Content-Type': 'application/json' },
+                body: (0, errors_1.formatODataError)(500, `Changeset rolled back: ${errorMessage}`),
+            }));
         }
-        await transaction.commit();
-        return responses;
     }
-    catch (error) {
-        // Ensure rollback happens even if commit fails
-        try {
-            await transaction.rollback();
-        }
-        catch (rollbackErr) {
-            // Log but don't throw - the original error is more important
-            console.error('Failed to rollback transaction:', rollbackErr);
-        }
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        // Return error response for all parts
-        return changeset.parts.map((part) => ({
-            contentId: part.contentId,
-            statusCode: 500,
-            headers: { 'Content-Type': 'application/json' },
-            body: (0, errors_1.formatODataError)(500, `Changeset rolled back: ${errorMessage}`),
-        }));
-    }
+    return responses;
 }
 /**
  * Process a single batch part

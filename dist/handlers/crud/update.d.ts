@@ -4,11 +4,11 @@ import { BaseHandler } from '../base-handler';
 /**
  * Handle OData update operations (PUT requests - full replace)
  */
-export declare function handleUpdate(req: Request, res: Response, handler: BaseHandler, entityName: string, keys: Record<string, unknown>, schema: ODataSchemaConfig, query: ParsedQuery, basePath: string, models: Record<string, any>): Promise<void>;
+export declare function handleUpdate(req: Request, res: Response, handler: BaseHandler, entityName: string, keys: Record<string, unknown>, schema: ODataSchemaConfig, query: ParsedQuery, basePath: string, models: Record<string, any>, sequelize: any): Promise<void>;
 /**
  * Handle OData merge operations (MERGE/PATCH requests - partial update)
  */
-export declare function handleMerge(req: Request, res: Response, handler: BaseHandler, entityName: string, keys: Record<string, unknown>, schema: ODataSchemaConfig, query: ParsedQuery, basePath: string, models: Record<string, any>): Promise<void>;
+export declare function handleMerge(req: Request, res: Response, handler: BaseHandler, entityName: string, keys: Record<string, unknown>, schema: ODataSchemaConfig, query: ParsedQuery, basePath: string, models: Record<string, any>, sequelize: any): Promise<void>;
 /**
  * Handle link creation (POST to $links)
  */

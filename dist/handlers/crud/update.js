@@ -10,9 +10,9 @@ const etag_1 = require("../../utils/etag");
 /**
  * Handle OData update operations (PUT requests - full replace)
  */
-async function handleUpdate(req, res, handler, entityName, keys, schema, query, basePath, models) {
+async function handleUpdate(req, res, handler, entityName, keys, schema, query, basePath, models, sequelize) {
     const odataReq = req;
-    const ctx = {
+    const baseCtx = {
         req: req,
         res: res,
         query,
@@ -33,11 +33,12 @@ async function handleUpdate(req, res, handler, entityName, keys, schema, query, 
     if (entity?.readOnly) {
         throw new errors_1.ODataError(405, `${entityName} is read-only`);
     }
-    // ETag validation for optimistic concurrency
+    // ETag validation for optimistic concurrency — a read-only check, done
+    // before opening the write transaction below.
     const ifMatch = req.headers['if-match'];
     if (ifMatch) {
         // Use a clean query without $select so timestamp fields are always included
-        const etagCtx = { ...ctx, query: { ...ctx.query, $select: undefined } };
+        const etagCtx = { ...baseCtx, query: { ...baseCtx.query, $select: undefined } };
         const existingEntity = await handler.handleReadSingle(etagCtx);
         if (existingEntity) {
             const currentETag = (0, etag_1.generateETag)(existingEntity);
@@ -46,18 +47,26 @@ async function handleUpdate(req, res, handler, entityName, keys, schema, query, 
             }
         }
     }
+    // Wrap the update — including afterUpdate — in a real transaction, so a
+    // hook that writes related rows (e.g. an audit/history log) commits or
+    // rolls back atomically with the entity itself, rather than the entity
+    // silently persisting even when the hook after it fails.
+    const transaction = await sequelize.transaction();
     try {
+        const ctx = { ...baseCtx, transaction };
         const updateData = transformUpdateData(body, entityName, schema);
         const result = await handler.handleUpdate(ctx, updateData);
         if (result === null) {
             throw new errors_1.ODataError(404, `${entityName} not found`);
         }
+        await transaction.commit();
         // Generate new ETag
         const newETag = (0, etag_1.generateETag)(result);
         const serialized = (0, json_serializer_1.serializeEntity)(result, entityName, schema, basePath, query.$select);
         res.status(200).header('ETag', newETag).json(serialized);
     }
     catch (error) {
+        await transaction.rollback();
         if (error instanceof errors_1.ODataError) {
             throw error;
         }
@@ -67,9 +76,9 @@ async function handleUpdate(req, res, handler, entityName, keys, schema, query, 
 /**
  * Handle OData merge operations (MERGE/PATCH requests - partial update)
  */
-async function handleMerge(req, res, handler, entityName, keys, schema, query, basePath, models) {
+async function handleMerge(req, res, handler, entityName, keys, schema, query, basePath, models, sequelize) {
     const odataReq = req;
-    const ctx = {
+    const baseCtx = {
         req: req,
         res: res,
         query,
@@ -90,11 +99,12 @@ async function handleMerge(req, res, handler, entityName, keys, schema, query, b
     if (entity?.readOnly) {
         throw new errors_1.ODataError(405, `${entityName} is read-only`);
     }
-    // ETag validation for optimistic concurrency
+    // ETag validation for optimistic concurrency — a read-only check, done
+    // before opening the write transaction below.
     const ifMatch = req.headers['if-match'];
     if (ifMatch) {
         // Use a clean query without $select so timestamp fields are always included
-        const etagCtx = { ...ctx, query: { ...ctx.query, $select: undefined } };
+        const etagCtx = { ...baseCtx, query: { ...baseCtx.query, $select: undefined } };
         const existingEntity = await handler.handleReadSingle(etagCtx);
         if (existingEntity) {
             const currentETag = (0, etag_1.generateETag)(existingEntity);
@@ -103,12 +113,18 @@ async function handleMerge(req, res, handler, entityName, keys, schema, query, b
             }
         }
     }
+    // Wrap the update — including afterUpdate — in a real transaction, so a
+    // hook that writes related rows (e.g. an audit/history log) commits or
+    // rolls back atomically with the entity itself.
+    const transaction = await sequelize.transaction();
     try {
+        const ctx = { ...baseCtx, transaction };
         const updateData = transformUpdateData(body, entityName, schema);
         const result = await handler.handleMerge(ctx, updateData);
         if (result === null) {
             throw new errors_1.ODataError(404, `${entityName} not found`);
         }
+        await transaction.commit();
         // Generate new ETag
         const newETag = (0, etag_1.generateETag)(result);
         // MERGE typically returns 204 No Content, but we can return the entity
@@ -123,6 +139,7 @@ async function handleMerge(req, res, handler, entityName, keys, schema, query, b
         }
     }
     catch (error) {
+        await transaction.rollback();
         if (error instanceof errors_1.ODataError) {
             throw error;
         }

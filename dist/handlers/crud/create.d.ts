@@ -4,7 +4,7 @@ import { BaseHandler } from '../base-handler';
 /**
  * Handle OData create operations (POST requests)
  */
-export declare function handleCreate(req: Request, res: Response, handler: BaseHandler, entityName: string, schema: ODataSchemaConfig, query: ParsedQuery, basePath: string, models: Record<string, any>): Promise<void>;
+export declare function handleCreate(req: Request, res: Response, handler: BaseHandler, entityName: string, schema: ODataSchemaConfig, query: ParsedQuery, basePath: string, models: Record<string, any>, sequelize: any): Promise<void>;
 /**
  * Handle deep create (POST with nested entities)
  */

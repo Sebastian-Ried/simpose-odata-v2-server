@@ -240,7 +240,8 @@ export class ODataService {
           this.schema,
           query,
           this.basePath,
-          this.models
+          this.models,
+          this.sequelize
         );
         break;
 
@@ -338,7 +339,8 @@ export class ODataService {
           this.schema,
           query,
           this.basePath,
-          this.models
+          this.models,
+          this.sequelize
         );
         break;
 
@@ -353,7 +355,8 @@ export class ODataService {
           this.schema,
           query,
           this.basePath,
-          this.models
+          this.models,
+          this.sequelize
         );
         break;
 

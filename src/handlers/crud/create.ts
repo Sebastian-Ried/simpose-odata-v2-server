@@ -27,21 +27,9 @@ export async function handleCreate(
   schema: ODataSchemaConfig,
   query: ParsedQuery,
   basePath: string,
-  models: Record<string, any>
+  models: Record<string, any>,
+  sequelize: any
 ): Promise<void> {
-  const odataReq = req as ODataRequest;
-  const ctx: HookContext = {
-    req: req as any,
-    res: res as any,
-    query,
-    entityName,
-    models,
-    user: (req as any).user,
-    data: {},
-    correlationId: odataReq.correlationId,
-    logger: odataReq.logger,
-  };
-
   const body = req.body;
 
   if (!body || typeof body !== 'object') {
@@ -54,11 +42,33 @@ export async function handleCreate(
     throw new ODataError(405, `${entityName} is read-only`);
   }
 
+  // Wrap the whole create — including afterCreate — in a real transaction, so
+  // a hook that writes related rows (e.g. an audit/history log) commits or
+  // rolls back atomically with the entity itself, rather than the entity
+  // silently persisting even when the hook after it fails.
+  const transaction = await sequelize.transaction();
+
   try {
+    const odataReq = req as ODataRequest;
+    const ctx: HookContext = {
+      req: req as any,
+      res: res as any,
+      query,
+      entityName,
+      models,
+      user: (req as any).user,
+      data: {},
+      transaction,
+      correlationId: odataReq.correlationId,
+      logger: odataReq.logger,
+    };
+
     // Validate and transform input data
     const createData = transformInputData(body, entityName, schema);
 
     const result = await handler.handleCreate(ctx, createData);
+
+    await transaction.commit();
 
     // Build Location header
     const keys = extractKeys(result as Record<string, unknown>, entityName, schema);
@@ -74,6 +84,8 @@ export async function handleCreate(
 
     res.status(201).header('Location', location).json(serialized);
   } catch (error) {
+    await transaction.rollback();
+
     if (error instanceof ODataError) {
       throw error;
     }

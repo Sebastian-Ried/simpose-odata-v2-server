@@ -28,10 +28,11 @@ export async function handleUpdate(
   schema: ODataSchemaConfig,
   query: ParsedQuery,
   basePath: string,
-  models: Record<string, any>
+  models: Record<string, any>,
+  sequelize: any
 ): Promise<void> {
   const odataReq = req as ODataRequest;
-  const ctx: HookContext = {
+  const baseCtx: HookContext = {
     req: req as any,
     res: res as any,
     query,
@@ -56,11 +57,12 @@ export async function handleUpdate(
     throw new ODataError(405, `${entityName} is read-only`);
   }
 
-  // ETag validation for optimistic concurrency
+  // ETag validation for optimistic concurrency — a read-only check, done
+  // before opening the write transaction below.
   const ifMatch = req.headers['if-match'];
   if (ifMatch) {
     // Use a clean query without $select so timestamp fields are always included
-    const etagCtx = { ...ctx, query: { ...ctx.query, $select: undefined } };
+    const etagCtx = { ...baseCtx, query: { ...baseCtx.query, $select: undefined } };
     const existingEntity = await handler.handleReadSingle(etagCtx);
     if (existingEntity) {
       const currentETag = generateETag(existingEntity as Record<string, unknown>);
@@ -70,13 +72,22 @@ export async function handleUpdate(
     }
   }
 
+  // Wrap the update — including afterUpdate — in a real transaction, so a
+  // hook that writes related rows (e.g. an audit/history log) commits or
+  // rolls back atomically with the entity itself, rather than the entity
+  // silently persisting even when the hook after it fails.
+  const transaction = await sequelize.transaction();
+
   try {
+    const ctx: HookContext = { ...baseCtx, transaction };
     const updateData = transformUpdateData(body, entityName, schema);
     const result = await handler.handleUpdate(ctx, updateData);
 
     if (result === null) {
       throw new ODataError(404, `${entityName} not found`);
     }
+
+    await transaction.commit();
 
     // Generate new ETag
     const newETag = generateETag(result as Record<string, unknown>);
@@ -91,6 +102,8 @@ export async function handleUpdate(
 
     res.status(200).header('ETag', newETag).json(serialized);
   } catch (error) {
+    await transaction.rollback();
+
     if (error instanceof ODataError) {
       throw error;
     }
@@ -110,10 +123,11 @@ export async function handleMerge(
   schema: ODataSchemaConfig,
   query: ParsedQuery,
   basePath: string,
-  models: Record<string, any>
+  models: Record<string, any>,
+  sequelize: any
 ): Promise<void> {
   const odataReq = req as ODataRequest;
-  const ctx: HookContext = {
+  const baseCtx: HookContext = {
     req: req as any,
     res: res as any,
     query,
@@ -138,11 +152,12 @@ export async function handleMerge(
     throw new ODataError(405, `${entityName} is read-only`);
   }
 
-  // ETag validation for optimistic concurrency
+  // ETag validation for optimistic concurrency — a read-only check, done
+  // before opening the write transaction below.
   const ifMatch = req.headers['if-match'];
   if (ifMatch) {
     // Use a clean query without $select so timestamp fields are always included
-    const etagCtx = { ...ctx, query: { ...ctx.query, $select: undefined } };
+    const etagCtx = { ...baseCtx, query: { ...baseCtx.query, $select: undefined } };
     const existingEntity = await handler.handleReadSingle(etagCtx);
     if (existingEntity) {
       const currentETag = generateETag(existingEntity as Record<string, unknown>);
@@ -152,13 +167,21 @@ export async function handleMerge(
     }
   }
 
+  // Wrap the update — including afterUpdate — in a real transaction, so a
+  // hook that writes related rows (e.g. an audit/history log) commits or
+  // rolls back atomically with the entity itself.
+  const transaction = await sequelize.transaction();
+
   try {
+    const ctx: HookContext = { ...baseCtx, transaction };
     const updateData = transformUpdateData(body, entityName, schema);
     const result = await handler.handleMerge(ctx, updateData);
 
     if (result === null) {
       throw new ODataError(404, `${entityName} not found`);
     }
+
+    await transaction.commit();
 
     // Generate new ETag
     const newETag = generateETag(result as Record<string, unknown>);
@@ -179,6 +202,8 @@ export async function handleMerge(
       res.status(204).header('ETag', newETag).send();
     }
   } catch (error) {
+    await transaction.rollback();
+
     if (error instanceof ODataError) {
       throw error;
     }
