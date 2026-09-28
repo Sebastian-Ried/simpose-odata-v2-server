@@ -215,7 +215,14 @@ export function odataLiteralToValue(literal: string | unknown, edmType?: EdmType
   // If edmType explicitly says Edm.String, don't infer numeric types from unquoted values.
   // parseKeyString strips OData quotes before parseEntityKeys re-calls with edmType,
   // so a value like '09764' arrives here as plain 09764 and must not be parsed as integer.
-  if (edmType === 'Edm.String') {
+  //
+  // Edm.Guid needs the same treatment: a single-key URL segment like
+  // Products('<guid>') arrives here as the bare, unprefixed GUID string, and
+  // GUID hex digits include a-f — so a GUID ending in 'd'/'D'/'f'/'F' would
+  // otherwise be caught by the Double/Single numeric-suffix heuristics below
+  // and silently corrupted (NaN, or a truncated wrong number from parseFloat
+  // stopping at the first hyphen).
+  if (edmType === 'Edm.String' || edmType === 'Edm.Guid') {
     try { return decodeURIComponent(literal); } catch { return literal; }
   }
 

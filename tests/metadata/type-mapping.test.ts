@@ -212,5 +212,28 @@ describe('Type Mapping', () => {
     it('should parse double', () => {
       expect(odataLiteralToValue('3.14')).toBe(3.14);
     });
+
+    // A single-key URL segment like Products('<guid>') arrives here as the
+    // bare, unprefixed GUID string plus edmType: 'Edm.Guid' (parseKeyString
+    // already stripped the quotes before this is called). GUID hex digits
+    // include a-f, so any GUID ending in 'd' or 'f' was previously matched
+    // by the Double/Single numeric-suffix heuristics below and silently
+    // turned into NaN instead of being kept as the key string.
+    it('should treat a bare Edm.Guid value as an opaque string, not a numeric literal', () => {
+      const guidEndingInF = 'fd3f1057-2575-40d1-927c-6ddca3977a2f';
+      expect(odataLiteralToValue(guidEndingInF, 'Edm.Guid')).toBe(guidEndingInF);
+    });
+
+    it('should not misparse a bare Edm.Guid value ending in "d" as a Double', () => {
+      const guidEndingInD = '12345678-1234-1234-1234-1234567890ad';
+      expect(odataLiteralToValue(guidEndingInD, 'Edm.Guid')).toBe(guidEndingInD);
+    });
+
+    it('should not misparse a bare Edm.Guid value ending in "l" as an Int64', () => {
+      // 'l'/'m' aren't valid hex digits, but the guard should be type-based
+      // (edmType === 'Edm.Guid'), not content-based, so assert it regardless.
+      const guidLike = '12345678-1234-1234-1234-1234567890al';
+      expect(odataLiteralToValue(guidLike, 'Edm.Guid')).toBe(guidLike);
+    });
   });
 });
