@@ -235,5 +235,21 @@ describe('Type Mapping', () => {
       const guidLike = '12345678-1234-1234-1234-1234567890al';
       expect(odataLiteralToValue(guidLike, 'Edm.Guid')).toBe(guidLike);
     });
+
+    // A single-key URL segment can also arrive with its explicit typed-literal
+    // prefix, e.g. Products(guid'<guid>') — the standard OData V2 form emitted
+    // by clients such as SAPUI5's ODataModel v2. Giving Edm.Guid the same
+    // early-return treatment as Edm.String (to dodge the numeric heuristics)
+    // must not regress this form back into an unstripped "guid'...'" string,
+    // which would otherwise be passed straight through to the database.
+    it('should strip the guid\'...\' wrapper from a typed-literal Edm.Guid key value', () => {
+      const guid = '00000000-0000-4000-a000-000000000002';
+      expect(odataLiteralToValue(`guid'${guid}'`, 'Edm.Guid')).toBe(guid);
+    });
+
+    it('should strip the guid\'...\' wrapper even when the guid ends in a hex-heuristic-triggering digit', () => {
+      const guidEndingInF = 'fd3f1057-2575-40d1-927c-6ddca3977a2f';
+      expect(odataLiteralToValue(`guid'${guidEndingInF}'`, 'Edm.Guid')).toBe(guidEndingInF);
+    });
   });
 });

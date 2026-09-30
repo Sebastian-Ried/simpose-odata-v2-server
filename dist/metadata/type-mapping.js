@@ -179,14 +179,31 @@ function odataLiteralToValue(literal, edmType) {
     // If edmType explicitly says Edm.String, don't infer numeric types from unquoted values.
     // parseKeyString strips OData quotes before parseEntityKeys re-calls with edmType,
     // so a value like '09764' arrives here as plain 09764 and must not be parsed as integer.
-    //
-    // Edm.Guid needs the same treatment: a single-key URL segment like
-    // Products('<guid>') arrives here as the bare, unprefixed GUID string, and
-    // GUID hex digits include a-f — so a GUID ending in 'd'/'D'/'f'/'F' would
-    // otherwise be caught by the Double/Single numeric-suffix heuristics below
-    // and silently corrupted (NaN, or a truncated wrong number from parseFloat
+    if (edmType === 'Edm.String') {
+        try {
+            return decodeURIComponent(literal);
+        }
+        catch {
+            return literal;
+        }
+    }
+    // Edm.Guid needs the same "never touch the numeric heuristics" treatment
+    // as Edm.String above: a single-key URL segment like Products('<guid>')
+    // arrives here as the bare, unprefixed GUID string, and GUID hex digits
+    // include a-f — so a GUID ending in 'd'/'D'/'f'/'F' would otherwise be
+    // caught by the Double/Single numeric-suffix heuristics below and
+    // silently corrupted (NaN, or a truncated wrong number from parseFloat
     // stopping at the first hyphen).
-    if (edmType === 'Edm.String' || edmType === 'Edm.Guid') {
+    //
+    // But a GUID key can also arrive with its explicit typed-literal prefix —
+    // Products(guid'<guid>') — the standard OData V2 form emitted by clients
+    // such as SAPUI5's ODataModel v2. That wrapper must be stripped here too;
+    // simply decoding it as-is (as Edm.String does) would pass the literal
+    // "guid'<guid>'" string straight through to the database.
+    if (edmType === 'Edm.Guid') {
+        const typedGuidMatch = literal.match(/^guid'(.+)'$/i);
+        if (typedGuidMatch)
+            return typedGuidMatch[1];
         try {
             return decodeURIComponent(literal);
         }
