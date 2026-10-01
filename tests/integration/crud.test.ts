@@ -88,7 +88,36 @@ describe('CRUD Operations', () => {
       it('should include ETag header', async () => {
         const res = await request(app, 'GET', '/odata/Product(1)');
 
+        expect(res.headers.etag).toBeDefined();
         expect(res.body.d.__metadata.etag).toBeDefined();
+      });
+
+      // Regression test: our own ETag is derived only from the entity's own
+      // updatedAt/createdAt, never from any expanded child collection. If a
+      // read with $expand carried that header, Express would auto-answer a
+      // later conditional GET (If-None-Match) with a bare 304 — bypassing
+      // the serializer entirely — even after an expanded child changed,
+      // since the parent's own timestamp never moved. The browser would
+      // then replay its last cached body for this URL forever, hiding the
+      // change. With the header omitted, Express falls back to its own
+      // content-hash ETag instead, which does change when the body does.
+      it('should answer a conditional GET with fresh data (not a stale 304) after an expanded child changes', async () => {
+        const first = await request(app, 'GET', '/odata/Order(1)?$expand=Items');
+        const staleETag = first.headers.etag;
+        expect(staleETag).toBeDefined();
+        expect(first.body.d.Items.results.length).toBe(2);
+
+        const created = await request(app, 'POST', '/odata/OrderItem', {
+          body: { OrderID: 1, ProductID: 1, Quantity: 1, UnitPrice: 10 },
+        });
+        expect(created.status).toBe(201);
+
+        const second = await request(app, 'GET', '/odata/Order(1)?$expand=Items', {
+          headers: { 'If-None-Match': staleETag },
+        });
+
+        expect(second.status).toBe(200);
+        expect(second.body.d.Items.results.length).toBe(3);
       });
     });
 

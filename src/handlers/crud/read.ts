@@ -64,9 +64,23 @@ export async function handleRead(
       );
 
       // Set ETag response header so UI5 uses our timestamp-based ETag
-      // (prevents Express from auto-generating one from the response body)
-      const etag = generateETag(entityData);
-      res.status(200).header('ETag', etag).json(serialized);
+      // (prevents Express from auto-generating one from the response body) —
+      // but only when the read has no $expand. Express auto-answers a
+      // conditional GET (If-None-Match) against this header with a bare 304,
+      // short-circuiting our serializer entirely. The ETag is derived solely
+      // from the entity's own updatedAt/createdAt, not from any expanded
+      // child collections, so a child added or removed via a separate
+      // request never changes it — the browser would then replay its last
+      // cached body for this URL forever, silently hiding the change.
+      // (The body's own __metadata.etag — used for If-Match on later writes —
+      // is unaffected: that's fine to keep, since a write targets the
+      // entity's own scalar fields and doesn't care about its expanded
+      // children.)
+      if (!query.$expand || query.$expand.length === 0) {
+        const etag = generateETag(entityData);
+        res.header('ETag', etag);
+      }
+      res.status(200).json(serialized);
     } else {
       // Entity set read
       const { results, count } = await handler.handleRead(ctx);
