@@ -2,11 +2,11 @@ import { ODataSchemaConfig } from '../config/types';
 /**
  * Serialize an entity set to OData V2 JSON format
  */
-export declare function serializeEntitySet(results: Record<string, unknown>[], entityName: string, schema: ODataSchemaConfig, basePath: string, select?: string[], count?: number, includeCount?: boolean): object;
+export declare function serializeEntitySet(results: Record<string, unknown>[], entityName: string, schema: ODataSchemaConfig, basePath: string, select?: string[], count?: number, includeCount?: boolean, omitUnselectedNavigation?: boolean): object;
 /**
  * Serialize a single entity to OData V2 JSON format
  */
-export declare function serializeEntity(entity: Record<string, unknown>, entityName: string, schema: ODataSchemaConfig, basePath: string, select?: string[]): object;
+export declare function serializeEntity(entity: Record<string, unknown>, entityName: string, schema: ODataSchemaConfig, basePath: string, select?: string[], omitUnselectedNavigation?: boolean): object;
 /**
  * Serialize a primitive value for function import results
  */

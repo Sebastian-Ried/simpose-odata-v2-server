@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
-import { ODataSchemaConfig, FunctionImportHandler, FunctionImportDefinition } from '../config/types';
+import { ODataSchemaConfig, FunctionImportHandler, FunctionImportDefinition, ParsedQuery } from '../config/types';
 /**
  * Handle function import execution
  */
-export declare function handleFunctionImport(req: Request, res: Response, functionName: string, schema: ODataSchemaConfig, basePath: string, models: Record<string, any>, functionImports: Record<string, FunctionImportHandler>, params: Record<string, unknown>): Promise<void>;
+export declare function handleFunctionImport(req: Request, res: Response, functionName: string, schema: ODataSchemaConfig, basePath: string, models: Record<string, any>, functionImports: Record<string, FunctionImportHandler>, params: Record<string, unknown>, query?: ParsedQuery): Promise<void>;
 /**
  * Parse function import parameters from URL
  */

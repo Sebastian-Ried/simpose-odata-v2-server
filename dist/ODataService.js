@@ -250,7 +250,7 @@ class ODataService {
             throw new errors_1.ODataError(404, `Function import ${functionName} not found`);
         }
         const params = (0, function_import_1.parseFunctionImportParams)(urlParams, req.query, funcDef);
-        await (0, function_import_1.handleFunctionImport)(req, res, functionName, this.schema, this.basePath, this.models, this.functionImports, params);
+        await (0, function_import_1.handleFunctionImport)(req, res, functionName, this.schema, this.basePath, this.models, this.functionImports, params, query);
     }
     /**
      * Handle batch request

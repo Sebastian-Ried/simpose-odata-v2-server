@@ -5,6 +5,7 @@ import {
   FunctionImportHandler,
   FunctionImportDefinition,
   Logger,
+  ParsedQuery,
 } from '../config/types';
 import { serializeEntitySet, serializeEntity, serializeValue } from '../serializers/json-serializer';
 import { ODataError } from '../utils/errors';
@@ -26,13 +27,18 @@ export async function handleFunctionImport(
   basePath: string,
   models: Record<string, any>,
   functionImports: Record<string, FunctionImportHandler>,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
+  query: ParsedQuery = {}
 ): Promise<void> {
   const funcDef = schema.functionImports?.[functionName];
 
   if (!funcDef) {
     throw new ODataError(404, `Function import ${functionName} not found`);
   }
+
+  // $select applies to functions returning entities; checked before the
+  // handler runs so an invalid request has no side effects.
+  const select = resolveSelect(query.$select, funcDef, schema);
 
   // Validate HTTP method
   if (req.method !== funcDef.httpMethod) {
@@ -70,7 +76,7 @@ export async function handleFunctionImport(
     const result = await handler(ctx, transformedParams);
 
     // Serialize result based on return type
-    serializeFunctionResult(res, result, funcDef, schema, basePath);
+    serializeFunctionResult(res, result, funcDef, schema, basePath, select);
   } catch (error) {
     if (error instanceof ODataError) {
       throw error;
@@ -167,6 +173,48 @@ function transformParameterValue(value: unknown, edmType: string): unknown {
 }
 
 /**
+ * Name of the entity a function returns (single or collection), or undefined
+ * for primitive / untyped results.
+ */
+function returnEntityName(funcDef: FunctionImportDefinition): string | undefined {
+  const returnType = funcDef.returnType;
+  if (!returnType) {
+    return undefined;
+  }
+  const inner = returnType.match(/^Collection\((.+)\)$/)?.[1] ?? returnType;
+  if (inner.startsWith('Edm.')) {
+    return undefined;
+  }
+  return inner.includes('.') ? inner.split('.').pop()! : inner;
+}
+
+/**
+ * Validates $select against the returned entity. Ignored for primitive
+ * results; unknown properties are a 400.
+ */
+function resolveSelect(
+  select: string[] | undefined,
+  funcDef: FunctionImportDefinition,
+  schema: ODataSchemaConfig
+): string[] | undefined {
+  if (!select || select.length === 0) {
+    return undefined;
+  }
+  const entityName = returnEntityName(funcDef);
+  const entityDef = entityName ? schema.entities[entityName] : undefined;
+  if (!entityDef) {
+    return undefined;
+  }
+  const unknown = select.filter(
+    (prop) => !entityDef.properties[prop] && !entityDef.navigationProperties?.[prop]
+  );
+  if (unknown.length > 0) {
+    throw new ODataError(400, `Invalid $select: Unknown properties: ${unknown.join(', ')}`);
+  }
+  return select;
+}
+
+/**
  * Serialize function import result
  */
 function serializeFunctionResult(
@@ -174,7 +222,8 @@ function serializeFunctionResult(
   result: unknown,
   funcDef: FunctionImportDefinition,
   schema: ODataSchemaConfig,
-  basePath: string
+  basePath: string,
+  select?: string[]
 ): void {
   if (result === undefined || result === null) {
     res.status(204).send();
@@ -212,7 +261,11 @@ function serializeFunctionResult(
         Array.isArray(result) ? result as Record<string, unknown>[] : [result as Record<string, unknown>],
         entityName,
         schema,
-        basePath
+        basePath,
+        select,
+        undefined,
+        false,
+        true
       );
       res.status(200).json(serialized);
     }
@@ -234,7 +287,9 @@ function serializeFunctionResult(
       result as Record<string, unknown>,
       entityName,
       schema,
-      basePath
+      basePath,
+      select,
+      true
     );
     res.status(200).json(serialized);
   }

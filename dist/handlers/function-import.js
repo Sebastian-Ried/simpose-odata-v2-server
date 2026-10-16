@@ -7,11 +7,14 @@ const errors_1 = require("../utils/errors");
 /**
  * Handle function import execution
  */
-async function handleFunctionImport(req, res, functionName, schema, basePath, models, functionImports, params) {
+async function handleFunctionImport(req, res, functionName, schema, basePath, models, functionImports, params, query = {}) {
     const funcDef = schema.functionImports?.[functionName];
     if (!funcDef) {
         throw new errors_1.ODataError(404, `Function import ${functionName} not found`);
     }
+    // $select applies to functions returning entities; checked before the
+    // handler runs so an invalid request has no side effects.
+    const select = resolveSelect(query.$select, funcDef, schema);
     // Validate HTTP method
     if (req.method !== funcDef.httpMethod) {
         throw new errors_1.ODataError(405, `Function import ${functionName} requires ${funcDef.httpMethod} method`);
@@ -39,7 +42,7 @@ async function handleFunctionImport(req, res, functionName, schema, basePath, mo
     try {
         const result = await handler(ctx, transformedParams);
         // Serialize result based on return type
-        serializeFunctionResult(res, result, funcDef, schema, basePath);
+        serializeFunctionResult(res, result, funcDef, schema, basePath, select);
     }
     catch (error) {
         if (error instanceof errors_1.ODataError) {
@@ -113,9 +116,43 @@ function transformParameterValue(value, edmType) {
     }
 }
 /**
+ * Name of the entity a function returns (single or collection), or undefined
+ * for primitive / untyped results.
+ */
+function returnEntityName(funcDef) {
+    const returnType = funcDef.returnType;
+    if (!returnType) {
+        return undefined;
+    }
+    const inner = returnType.match(/^Collection\((.+)\)$/)?.[1] ?? returnType;
+    if (inner.startsWith('Edm.')) {
+        return undefined;
+    }
+    return inner.includes('.') ? inner.split('.').pop() : inner;
+}
+/**
+ * Validates $select against the returned entity. Ignored for primitive
+ * results; unknown properties are a 400.
+ */
+function resolveSelect(select, funcDef, schema) {
+    if (!select || select.length === 0) {
+        return undefined;
+    }
+    const entityName = returnEntityName(funcDef);
+    const entityDef = entityName ? schema.entities[entityName] : undefined;
+    if (!entityDef) {
+        return undefined;
+    }
+    const unknown = select.filter((prop) => !entityDef.properties[prop] && !entityDef.navigationProperties?.[prop]);
+    if (unknown.length > 0) {
+        throw new errors_1.ODataError(400, `Invalid $select: Unknown properties: ${unknown.join(', ')}`);
+    }
+    return select;
+}
+/**
  * Serialize function import result
  */
-function serializeFunctionResult(res, result, funcDef, schema, basePath) {
+function serializeFunctionResult(res, result, funcDef, schema, basePath, select) {
     if (result === undefined || result === null) {
         res.status(204).send();
         return;
@@ -143,7 +180,7 @@ function serializeFunctionResult(res, result, funcDef, schema, basePath) {
             const entityName = innerType.includes('.')
                 ? innerType.split('.').pop()
                 : innerType;
-            const serialized = (0, json_serializer_1.serializeEntitySet)(Array.isArray(result) ? result : [result], entityName, schema, basePath);
+            const serialized = (0, json_serializer_1.serializeEntitySet)(Array.isArray(result) ? result : [result], entityName, schema, basePath, select, undefined, false, true);
             res.status(200).json(serialized);
         }
         return;
@@ -159,7 +196,7 @@ function serializeFunctionResult(res, result, funcDef, schema, basePath) {
         const entityName = returnType.includes('.')
             ? returnType.split('.').pop()
             : returnType;
-        const serialized = (0, json_serializer_1.serializeEntity)(result, entityName, schema, basePath);
+        const serialized = (0, json_serializer_1.serializeEntity)(result, entityName, schema, basePath, select, true);
         res.status(200).json(serialized);
     }
 }

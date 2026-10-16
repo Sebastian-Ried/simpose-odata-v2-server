@@ -9,8 +9,8 @@ const etag_1 = require("../utils/etag");
 /**
  * Serialize an entity set to OData V2 JSON format
  */
-function serializeEntitySet(results, entityName, schema, basePath, select, count, includeCount = false) {
-    const serializedResults = results.map((entity) => serializeEntityData(entity, entityName, schema, basePath, select));
+function serializeEntitySet(results, entityName, schema, basePath, select, count, includeCount = false, omitUnselectedNavigation = false) {
+    const serializedResults = results.map((entity) => serializeEntityData(entity, entityName, schema, basePath, select, omitUnselectedNavigation));
     const response = {
         d: {
             results: serializedResults,
@@ -25,15 +25,15 @@ function serializeEntitySet(results, entityName, schema, basePath, select, count
 /**
  * Serialize a single entity to OData V2 JSON format
  */
-function serializeEntity(entity, entityName, schema, basePath, select) {
+function serializeEntity(entity, entityName, schema, basePath, select, omitUnselectedNavigation = false) {
     return {
-        d: serializeEntityData(entity, entityName, schema, basePath, select),
+        d: serializeEntityData(entity, entityName, schema, basePath, select, omitUnselectedNavigation),
     };
 }
 /**
  * Serialize entity data with metadata
  */
-function serializeEntityData(entity, entityName, schema, basePath, select) {
+function serializeEntityData(entity, entityName, schema, basePath, select, omitUnselectedNavigation = false) {
     const entityDef = schema.entities[entityName];
     if (!entityDef) {
         return entity;
@@ -80,6 +80,12 @@ function serializeEntityData(entity, entityName, schema, basePath, select) {
     // Serialize navigation properties if expanded
     if (entityDef.navigationProperties) {
         for (const [navName, navProp] of Object.entries(entityDef.navigationProperties)) {
+            // With $select, unselected navigation properties are left out entirely
+            // (no __deferred link) when the caller asks for it — function imports
+            // do, entity set reads keep their links for existing clients.
+            if (omitUnselectedNavigation && select && select.length > 0 && !select.includes(navName)) {
+                continue;
+            }
             const navValue = entity[navName];
             if (navValue !== undefined) {
                 if (Array.isArray(navValue)) {

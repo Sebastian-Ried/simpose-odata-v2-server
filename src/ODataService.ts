@@ -510,7 +510,8 @@ export class ODataService {
       this.basePath,
       this.models,
       this.functionImports,
-      params
+      params,
+      query
     );
   }
 

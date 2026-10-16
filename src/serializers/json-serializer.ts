@@ -17,10 +17,11 @@ export function serializeEntitySet(
   basePath: string,
   select?: string[],
   count?: number,
-  includeCount: boolean = false
+  includeCount: boolean = false,
+  omitUnselectedNavigation: boolean = false
 ): object {
   const serializedResults = results.map((entity) =>
-    serializeEntityData(entity, entityName, schema, basePath, select)
+    serializeEntityData(entity, entityName, schema, basePath, select, omitUnselectedNavigation)
   );
 
   const response: any = {
@@ -45,10 +46,11 @@ export function serializeEntity(
   entityName: string,
   schema: ODataSchemaConfig,
   basePath: string,
-  select?: string[]
+  select?: string[],
+  omitUnselectedNavigation: boolean = false
 ): object {
   return {
-    d: serializeEntityData(entity, entityName, schema, basePath, select),
+    d: serializeEntityData(entity, entityName, schema, basePath, select, omitUnselectedNavigation),
   };
 }
 
@@ -60,7 +62,8 @@ function serializeEntityData(
   entityName: string,
   schema: ODataSchemaConfig,
   basePath: string,
-  select?: string[]
+  select?: string[],
+  omitUnselectedNavigation: boolean = false
 ): Record<string, unknown> {
   const entityDef = schema.entities[entityName];
   if (!entityDef) {
@@ -117,6 +120,13 @@ function serializeEntityData(
   // Serialize navigation properties if expanded
   if (entityDef.navigationProperties) {
     for (const [navName, navProp] of Object.entries(entityDef.navigationProperties)) {
+      // With $select, unselected navigation properties are left out entirely
+      // (no __deferred link) when the caller asks for it — function imports
+      // do, entity set reads keep their links for existing clients.
+      if (omitUnselectedNavigation && select && select.length > 0 && !select.includes(navName)) {
+        continue;
+      }
+
       const navValue = entity[navName];
 
       if (navValue !== undefined) {
