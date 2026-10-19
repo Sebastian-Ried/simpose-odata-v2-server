@@ -1,8 +1,13 @@
 import { ODataSchemaConfig } from '../config/types';
 /**
- * Build Sequelize attributes from $select options
+ * Build Sequelize attributes from $select options.
+ *
+ * `modelAttributes` are the Sequelize model's attribute names. When given, a
+ * timestamp is mapped to the name the model actually uses: a model with
+ * `createdAt: 'created_at'` has the attribute `created_at`, even if the
+ * schema calls the property `createdAt`.
  */
-export declare function buildSelect(select: string[], entityName: string, schema: ODataSchemaConfig): string[];
+export declare function buildSelect(select: string[], entityName: string, schema: ODataSchemaConfig, modelAttributes?: string[]): string[];
 /**
  * Build attribute exclusion list
  */

@@ -82,7 +82,13 @@ export class QueryBuilder {
 
     // $select
     if (query.$select && query.$select.length > 0) {
-      options.attributes = buildSelect(query.$select, entityName, this.schema);
+      const model = this.getModel(entityName);
+      options.attributes = buildSelect(
+        query.$select,
+        entityName,
+        this.schema,
+        model ? Object.keys(model.getAttributes()) : undefined
+      );
     }
 
     // $expand

@@ -54,7 +54,8 @@ class QueryBuilder {
         }
         // $select
         if (query.$select && query.$select.length > 0) {
-            options.attributes = (0, select_handler_1.buildSelect)(query.$select, entityName, this.schema);
+            const model = this.getModel(entityName);
+            options.attributes = (0, select_handler_1.buildSelect)(query.$select, entityName, this.schema, model ? Object.keys(model.getAttributes()) : undefined);
         }
         // $expand
         if (query.$expand && query.$expand.length > 0) {

@@ -6,39 +6,57 @@ exports.isPropertySelected = isPropertySelected;
 exports.filterSelectedProperties = filterSelectedProperties;
 exports.getAllPropertyNames = getAllPropertyNames;
 exports.getAllNavigationPropertyNames = getAllNavigationPropertyNames;
+const TIMESTAMP_ALIASES = {
+    updatedAt: ['updatedAt', 'updated_at'],
+    updated_at: ['updatedAt', 'updated_at'],
+    createdAt: ['createdAt', 'created_at'],
+    created_at: ['createdAt', 'created_at'],
+};
 /**
- * Build Sequelize attributes from $select options
+ * Build Sequelize attributes from $select options.
+ *
+ * `modelAttributes` are the Sequelize model's attribute names. When given, a
+ * timestamp is mapped to the name the model actually uses: a model with
+ * `createdAt: 'created_at'` has the attribute `created_at`, even if the
+ * schema calls the property `createdAt`.
  */
-function buildSelect(select, entityName, schema) {
+function buildSelect(select, entityName, schema, modelAttributes) {
     const entity = schema.entities[entityName];
     if (!entity) {
         return select;
     }
-    // Separate properties from navigation properties
+    const toAttribute = (name) => {
+        if (!modelAttributes || modelAttributes.includes(name)) {
+            return name;
+        }
+        return TIMESTAMP_ALIASES[name]?.find((alias) => modelAttributes.includes(alias)) ?? name;
+    };
     const properties = [];
+    const add = (name) => {
+        const attribute = toAttribute(name);
+        if (attribute && !properties.includes(attribute)) {
+            properties.push(attribute);
+        }
+    };
     for (const item of select) {
         // Handle nested selection (Property/SubProperty)
         const baseProp = item.split('/')[0];
         // Check if it's a regular non-virtual property
         if (entity.properties[baseProp] && !entity.properties[baseProp].virtual) {
             // Add the base property (Sequelize doesn't support nested property selection)
-            if (!properties.includes(baseProp)) {
-                properties.push(baseProp);
-            }
+            add(baseProp);
         }
         // Navigation properties are handled by $expand
     }
     // Always include primary keys
     for (const key of entity.keys) {
-        if (!properties.includes(key)) {
-            properties.push(key);
-        }
+        add(key);
     }
     // Always include timestamp fields for consistent ETag generation
     const timestampFields = ['updatedAt', 'updated_at', 'createdAt', 'created_at'];
     for (const ts of timestampFields) {
-        if (entity.properties[ts] && !properties.includes(ts)) {
-            properties.push(ts);
+        if (entity.properties[ts]) {
+            add(ts);
         }
     }
     return properties;
