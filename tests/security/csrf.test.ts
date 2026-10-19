@@ -99,6 +99,38 @@ describe('CSRF Protection', () => {
       expect(response.body?.error?.code).toBe('CSRF_TOKEN_MISSING');
     });
 
+    it('should block POST that sends Fetch instead of a token', async () => {
+      const app = createAppWithCsrf();
+      const response = await request(app, 'POST', '/odata/Product', {
+        headers: { 'X-CSRF-Token': 'Fetch' },
+        body: { Name: 'Test', Price: 10.00 },
+      });
+
+      expect(response.status).toBe(403);
+      expect(response.body?.error?.code).toBe('CSRF_TOKEN_INVALID');
+      expect(await models.Product.count({ where: { Name: 'Test' } })).toBe(0);
+    });
+
+    it('should block DELETE that sends Fetch instead of a token', async () => {
+      const app = createAppWithCsrf();
+      const response = await request(app, 'DELETE', '/odata/Product(1)', {
+        headers: { 'X-CSRF-Token': 'Fetch' },
+      });
+
+      expect(response.status).toBe(403);
+      expect(await models.Product.count({ where: { ID: 1 } })).toBe(1);
+    });
+
+    it('should hand out a token on HEAD with Fetch header', async () => {
+      const app = createAppWithCsrf();
+      const response = await request(app, 'HEAD', '/odata/Product', {
+        headers: { 'X-CSRF-Token': 'Fetch' },
+      });
+
+      expect(response.headers['x-csrf-token']).toBeDefined();
+      expect(response.headers['x-csrf-token']).not.toBe('Fetch');
+    });
+
     it('should allow $metadata without CSRF token', async () => {
       const app = createAppWithCsrf();
       const response = await request(app, 'GET', '/odata/$metadata', {

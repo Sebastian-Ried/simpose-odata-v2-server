@@ -158,8 +158,11 @@ function createCsrfProtection(options = {}) {
             next();
             return;
         }
-        // Handle token fetch request (HEAD or GET with 'Fetch' header)
-        if (tokenHeader?.toLowerCase() === 'fetch') {
+        const isProtected = config.protectedMethods.includes(req.method.toUpperCase());
+        // Handle token fetch request (HEAD or GET with 'Fetch' header). A
+        // modifying request sending 'Fetch' is not a fetch: it falls through to
+        // validation and fails, otherwise 'Fetch' would bypass the check.
+        if (!isProtected && tokenHeader?.toLowerCase() === 'fetch') {
             const sessionId = getSessionId(req);
             const token = generateCsrfToken();
             storeToken(sessionId, token);
@@ -168,7 +171,7 @@ function createCsrfProtection(options = {}) {
             return;
         }
         // Check if this method requires CSRF protection
-        if (!config.protectedMethods.includes(req.method.toUpperCase())) {
+        if (!isProtected) {
             next();
             return;
         }
