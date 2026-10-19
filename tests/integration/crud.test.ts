@@ -119,6 +119,20 @@ describe('CRUD Operations', () => {
         expect(second.status).toBe(200);
         expect(second.body.d.Items.results.length).toBe(3);
       });
+
+      // UI5's ODataModel copies a single-entity read's ETag header into
+      // __metadata.etag and sends it as If-Match on the next write. An
+      // $expand read must therefore carry our timestamp ETag, not Express's
+      // body hash, or that write fails with 412.
+      it('should send the entity ETag as header on an $expand read, usable for If-Match', async () => {
+        const read = await request(app, 'GET', '/odata/Order(1)?$expand=Items');
+        expect(read.headers.etag).toBe(read.body.d.__metadata.etag);
+
+        const del = await request(app, 'DELETE', '/odata/Order(1)', {
+          headers: { 'If-Match': read.headers.etag },
+        });
+        expect(del.status).toBe(204);
+      });
     });
 
     describe('$filter', () => {

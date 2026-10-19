@@ -35,21 +35,21 @@ async function handleRead(req, res, handler, entityName, keys, schema, query, ba
             const entityData = result;
             const serialized = (0, json_serializer_1.serializeEntity)(entityData, entityName, schema, basePath, query.$select);
             // Set ETag response header so UI5 uses our timestamp-based ETag
-            // (prevents Express from auto-generating one from the response body) —
-            // but only when the read has no $expand. Express auto-answers a
-            // conditional GET (If-None-Match) against this header with a bare 304,
-            // short-circuiting our serializer entirely. The ETag is derived solely
-            // from the entity's own updatedAt/createdAt, not from any expanded
-            // child collections, so a child added or removed via a separate
-            // request never changes it — the browser would then replay its last
-            // cached body for this URL forever, silently hiding the change.
-            // (The body's own __metadata.etag — used for If-Match on later writes —
-            // is unaffected: that's fine to keep, since a write targets the
-            // entity's own scalar fields and doesn't care about its expanded
-            // children.)
-            if (!query.$expand || query.$expand.length === 0) {
-                const etag = (0, etag_1.generateETag)(entityData);
-                res.header('ETag', etag);
+            // (prevents Express from auto-generating one from the response body).
+            // UI5 copies this header into __metadata.etag and sends it as If-Match
+            // on the next write, so it must be ours on every read — an Express
+            // body hash there makes that write fail with 412.
+            //
+            // On an $expand read the header must not answer a conditional GET,
+            // though: Express auto-answers If-None-Match against it with a bare
+            // 304, and our ETag only covers the entity's own updatedAt/createdAt,
+            // not the expanded children — a child added or removed via a separate
+            // request would never change it, and the browser would replay its last
+            // cached body for this URL forever. So such a read ignores
+            // If-None-Match and always sends the body.
+            res.header('ETag', (0, etag_1.generateETag)(entityData));
+            if (query.$expand && query.$expand.length > 0) {
+                delete req.headers['if-none-match'];
             }
             res.status(200).json(serialized);
         }
