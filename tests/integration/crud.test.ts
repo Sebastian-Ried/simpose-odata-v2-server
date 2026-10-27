@@ -278,6 +278,30 @@ describe('CRUD Operations', () => {
         expect(res.status).toBe(200);
         expect(res.body.d.Category.Name).toBe('Electronics');
       });
+
+      // OData V2 JSON represents an expanded to-one navigation without a
+      // target as null. Leaving the property out made clients keep whatever
+      // they had cached for it (UI5's ODataModel kept showing the old
+      // Category after CategoryID was cleared).
+      it('should serialize an expanded to-one navigation without target as null', async () => {
+        await models.Product.update({ CategoryID: null }, { where: { ID: 1 } });
+
+        const single = await request(app, 'GET', '/odata/Product(1)?$expand=Category');
+        expect(single.status).toBe(200);
+        expect(single.body.d).toHaveProperty('Category', null);
+
+        const set = await request(app, 'GET', '/odata/Product?$expand=Category');
+        const product = set.body.d.results.find((p: { ID: number }) => p.ID === 1);
+        expect(product).toHaveProperty('Category', null);
+        expect(set.body.d.results.find((p: { ID: number }) => p.ID === 2).Category.Name).toBeDefined();
+      });
+
+      it('should keep a deferred link for a to-one navigation that is not expanded', async () => {
+        await models.Product.update({ CategoryID: null }, { where: { ID: 1 } });
+
+        const res = await request(app, 'GET', '/odata/Product(1)');
+        expect(res.body.d.Category.__deferred.uri).toContain('/Category');
+      });
     });
   });
 

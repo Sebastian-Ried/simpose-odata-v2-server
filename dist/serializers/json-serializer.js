@@ -98,6 +98,12 @@ function serializeEntityData(entity, entityName, schema, basePath, select, omitU
                     // Single navigation property
                     result[navName] = serializeEntityData(navValue, navProp.target, schema, basePath);
                 }
+                else {
+                    // Expanded single navigation without a target (e.g. a null foreign
+                    // key): OData V2 JSON represents it as null. Leaving it out would
+                    // make clients keep whatever they had cached for it.
+                    result[navName] = null;
+                }
             }
             else {
                 // Deferred link
