@@ -13,6 +13,7 @@ type TenantId = string | number;
 export declare class TenantScope {
     readonly attribute: string;
     private readonly resolveFn;
+    private readonly exclude;
     private schema?;
     private models;
     constructor(options: TenantOptions);
@@ -23,7 +24,7 @@ export declare class TenantScope {
      * referential constraint in the schema where the entity is the dependent.
      */
     private foreignKeys;
-    /** Whether rows of the model belong to a tenant. */
+    /** Whether rows of the model belong to a tenant (has the attribute, not excluded). */
     isScoped(model: ModelStatic<Model> | undefined): boolean;
     /** Marks a $batch part's mock request with the outer request's tenant. */
     static setBatchTenant(mockReq: Record<PropertyKey, unknown>, tenantId: TenantId | null): void;

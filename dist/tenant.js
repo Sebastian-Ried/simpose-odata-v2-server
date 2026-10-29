@@ -17,6 +17,7 @@ const BATCH_TENANT = Symbol('odataBatchTenant');
 class TenantScope {
     attribute;
     resolveFn;
+    exclude;
     schema;
     models = {};
     constructor(options) {
@@ -25,6 +26,7 @@ class TenantScope {
         }
         this.attribute = options.attribute;
         this.resolveFn = options.resolve;
+        this.exclude = new Set(options.exclude ?? []);
     }
     /** The schema and models, for the foreign keys declared by referential constraints. */
     setSchema(schema, models) {
@@ -64,9 +66,9 @@ class TenantScope {
         }
         return [...refs.values()];
     }
-    /** Whether rows of the model belong to a tenant. */
+    /** Whether rows of the model belong to a tenant (has the attribute, not excluded). */
     isScoped(model) {
-        return !!model?.rawAttributes?.[this.attribute];
+        return !!model?.rawAttributes?.[this.attribute] && !this.exclude.has(model.name);
     }
     /** Marks a $batch part's mock request with the outer request's tenant. */
     static setBatchTenant(mockReq, tenantId) {

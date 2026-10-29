@@ -31,6 +31,7 @@ interface ForeignKeyRef {
 export class TenantScope {
   readonly attribute: string;
   private readonly resolveFn: TenantOptions['resolve'];
+  private readonly exclude: Set<string>;
   private schema?: ODataSchemaConfig;
   private models: Record<string, ModelStatic<Model>> = {};
 
@@ -40,6 +41,7 @@ export class TenantScope {
     }
     this.attribute = options.attribute;
     this.resolveFn = options.resolve;
+    this.exclude = new Set(options.exclude ?? []);
   }
 
   /** The schema and models, for the foreign keys declared by referential constraints. */
@@ -80,9 +82,9 @@ export class TenantScope {
     return [...refs.values()];
   }
 
-  /** Whether rows of the model belong to a tenant. */
+  /** Whether rows of the model belong to a tenant (has the attribute, not excluded). */
   isScoped(model: ModelStatic<Model> | undefined): boolean {
-    return !!(model as any)?.rawAttributes?.[this.attribute];
+    return !!(model as any)?.rawAttributes?.[this.attribute] && !this.exclude.has((model as any).name);
   }
 
   /** Marks a $batch part's mock request with the outer request's tenant. */

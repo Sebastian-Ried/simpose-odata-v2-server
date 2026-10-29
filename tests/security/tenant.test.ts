@@ -286,6 +286,48 @@ describe('Tenant isolation', () => {
     })).toThrow(/not allowed with tenant isolation/);
   });
 
+  it('excluded models are not scoped and foreign keys into them are not checked', async () => {
+    const Owner = sequelize.define('Owner', {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      tenantId: DataTypes.STRING, // only set for some owners: a global table
+      name: DataTypes.STRING,
+    }, { timestamps: false });
+    const Note = sequelize.define('Note', {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      tenantId: { type: DataTypes.STRING, allowNull: false },
+      ownerId: DataTypes.INTEGER,
+    }, { timestamps: false });
+    Note.belongsTo(Owner, { foreignKey: 'ownerId', as: 'owner' });
+    await Owner.sync({ force: true });
+    await Note.sync({ force: true });
+    const owner = await Owner.create({ name: 'global user' });
+    const noteSchema: ODataSchemaConfig = {
+      namespace: 'Notes',
+      entities: {
+        Notes: { model: 'Note', keys: ['id'], properties: {
+          id: { type: 'Edm.Int32', nullable: false }, tenantId: { type: 'Edm.String' }, ownerId: { type: 'Edm.Int32' },
+        } },
+        Owners: { model: 'Owner', keys: ['id'], properties: {
+          id: { type: 'Edm.Int32', nullable: false }, tenantId: { type: 'Edm.String' }, name: { type: 'Edm.String' },
+        } },
+      },
+    };
+    const make = (exclude?: string[]) => {
+      const a = express();
+      a.use('/odata', odataMiddleware({
+        sequelize, schema: noteSchema, models: { Note, Owner }, csrf: { enabled: false },
+        tenant: { attribute: 'tenantId', resolve: (req) => req.headers['x-tenant'] as string, exclude },
+      }));
+      return a;
+    };
+    const scoped = await request(make(), 'POST', '/odata/Notes', { ...as('a'), body: { ownerId: owner.get('id') } });
+    expect(scoped.status).toBe(404);
+    const excluded = await request(make(['Owner']), 'POST', '/odata/Notes', { ...as('a'), body: { ownerId: owner.get('id') } });
+    expect(excluded.status).toBe(201);
+    const owners = await request(make(['Owner']), 'GET', '/odata/Owners', as('a'));
+    expect(owners.body.d.results).toHaveLength(1);
+  });
+
   it('leaves models without the tenant attribute unscoped', async () => {
     const res = await request(app(), 'GET', '/odata/Tenants', as('a'));
     expect(res.body.d.results).toHaveLength(2);

@@ -318,6 +318,12 @@ export interface TenantOptions {
   attribute: string;
   /** The request's tenant id; called after the consumer's own middleware */
   resolve: (req: import('express').Request) => string | number | null | undefined;
+  /**
+   * Model names that have the attribute but aren't tenant rows (e.g. a global
+   * `User` table whose `clientId` is only set for some rows): never scoped,
+   * and foreign keys into them aren't checked against the tenant.
+   */
+  exclude?: string[];
 }
 
 /**

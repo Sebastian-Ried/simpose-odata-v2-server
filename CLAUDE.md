@@ -141,7 +141,7 @@ The middleware supports `$filter=navProp/field eq value` syntax. Internally:
 ```bash
 npm install           # install deps
 npm run build         # TypeScript → dist/
-npm test              # 588 tests
+npm test              # 589 tests
 npm run dev           # watch mode
 ```
 
