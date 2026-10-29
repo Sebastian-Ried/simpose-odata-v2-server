@@ -118,6 +118,7 @@ applied by `DefaultHandler`):
 - reads: root `where` and every include (`$expand`, `$filter`/`$orderby` auto-includes, navigation reads) get `attribute = tenant`; includes stay LEFT JOINs (`required: false` unless set)
 - update/merge/delete: the key `where` includes the tenant, so a key that exists in several tenants only touches the request tenant's row; no row → 404
 - create/update payloads: another tenant → 403 (create sets it, update drops it); every foreign key in the payload (`BelongsTo` association or schema `referentialConstraint`) must point at a row of the tenant → 404
+- `exclude: ['User']` (v1.3.0+): model names that have `attribute` but aren't tenant rows (a global users table whose `clientId` is only set for some rows) — never scoped, and foreign keys into them aren't checked
 - `resolve` returning nothing → 403. `$batch` parts get the tenant resolved from the outer request (a part's own headers never choose it). Function imports are not scoped; a custom handler for a scoped model is refused at startup
 
 Also since v1.2.0, for every consumer: payload properties not in the (enriched) schema are dropped,
@@ -150,5 +151,5 @@ After changes: rebuild (`npm run build`), commit dist/, tag, push. Consumers upd
 ## Testing
 
 - Tests use SQLite in-memory (no external DB needed)
-- `vitest` framework, 26 test files, 588 tests
+- `vitest` framework, 26 test files, 589 tests
 - Note: `iLike` (case-insensitive LIKE) is not supported by SQLite — string function tests accept both 200 and 500
