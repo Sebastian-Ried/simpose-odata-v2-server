@@ -33,5 +33,5 @@ import { BaseHandler } from '../base-handler';
  * Response: 204 No Content
  * ```
  */
-export declare function handleDelete(req: Request, res: Response, handler: BaseHandler, entityName: string, keys: Record<string, unknown>, schema: ODataSchemaConfig, query: ParsedQuery, models: Record<string, any>): Promise<void>;
+export declare function handleDelete(req: Request, res: Response, handler: BaseHandler, entityName: string, keys: Record<string, unknown>, schema: ODataSchemaConfig, query: ParsedQuery, models: Record<string, any>, sequelize?: any): Promise<void>;
 //# sourceMappingURL=delete.d.ts.map

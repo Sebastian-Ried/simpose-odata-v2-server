@@ -19,6 +19,7 @@ import { parseQueryOptions } from './parser/query-options';
 import { handleRead, handleCount, handleNavigationRead, handlePropertyValue } from './handlers/crud/read';
 import { handleCreate, handleNavigationCreate } from './handlers/crud/create';
 import { handleUpdate, handleMerge, handleCreateLink, handleDeleteLink } from './handlers/crud/update';
+import { TenantScope } from './tenant';
 import { handleDelete } from './handlers/crud/delete';
 import { handleMetadata, handleServiceDocument } from './handlers/metadata';
 import { handleBatch } from './handlers/batch';
@@ -40,6 +41,7 @@ export class ODataService {
   private functionImports: Record<string, FunctionImportHandler>;
   private basePath: string;
   private verboseErrors: boolean;
+  private tenant?: TenantScope;
 
   constructor(options: ODataMiddlewareOptions) {
     // Load and validate schema
@@ -49,6 +51,7 @@ export class ODataService {
     this.basePath = options.basePath || '';
     this.verboseErrors = options.verboseErrors ?? defaults.verboseErrors;
     this.functionImports = options.functionImports || {};
+    this.tenant = options.tenant ? new TenantScope(options.tenant) : undefined;
 
     // Initialize metadata generator
     this.metadataGenerator = new MetadataGenerator(
@@ -62,6 +65,8 @@ export class ODataService {
     // Without this, auto-detected attributes appear in $metadata but are never fetched,
     // causing UI5 OData model warnings like "No data loaded for select property: created_at".
     this.schema = this.metadataGenerator.getEnrichedSchema();
+
+    this.tenant?.setSchema(this.schema, this.models);
 
     // Initialize query builder
     this.queryBuilder = new QueryBuilder(
@@ -104,6 +109,11 @@ export class ODataService {
 
       // Check for custom handler
       if (customHandlers?.[entityName]) {
+        // A custom handler does its own queries: it can't be held to the
+        // tenant rules, so the combination is refused (fail closed).
+        if (this.tenant?.isScoped(model)) {
+          throw new Error(`Custom handler for ${entityName} is not allowed with tenant isolation`);
+        }
         const CustomHandler = customHandlers[entityName]!;
         const handler = new CustomHandler();
         handler.initialize?.(model, entityName, this.schema);
@@ -116,7 +126,8 @@ export class ODataService {
           this.schema,
           this.queryBuilder,
           this.sequelize,
-          hooks
+          hooks,
+          this.tenant
         );
         this.handlers.set(entityName, handler);
       }
@@ -369,7 +380,8 @@ export class ODataService {
           keys,
           this.schema,
           query,
-          this.models
+          this.models,
+          this.sequelize
         );
         break;
 
@@ -452,13 +464,14 @@ export class ODataService {
         await handleCreateLink(
           req,
           res,
-          handler,
           entityName,
           keys,
           navigationProperty,
           this.schema,
+          query,
           this.models,
-          this.sequelize
+          this.sequelize,
+          Object.fromEntries(this.handlers)
         );
         break;
 
@@ -466,13 +479,15 @@ export class ODataService {
         await handleDeleteLink(
           req,
           res,
-          handler,
           entityName,
           keys,
           navigationProperty,
           targetKeys,
           this.schema,
-          this.models
+          query,
+          this.models,
+          this.sequelize,
+          Object.fromEntries(this.handlers)
         );
         break;
 
@@ -519,13 +534,17 @@ export class ODataService {
    * Handle batch request
    */
   private async handleBatchRequest(req: Request, res: Response): Promise<void> {
+    // Batch parts run on mock requests built from the part's own headers: the
+    // tenant is resolved once from the outer (authenticated) request instead,
+    // so a part can never choose its tenant. No tenant → every part is 403.
+    const tenantId = this.tenant?.resolveRequest(req);
     await handleBatch(
       req,
       res,
       this.schema,
       this.basePath,
       async (method, path, headers, body, contentId) => {
-        return this.processBatchPart(method, path, headers, body, contentId);
+        return this.processBatchPart(method, path, headers, body, contentId, tenantId);
       },
       this.sequelize
     );
@@ -539,7 +558,8 @@ export class ODataService {
     path: string,
     headers: Record<string, string>,
     body: unknown,
-    contentId?: string
+    contentId?: string,
+    tenantId?: string | number | null
   ): Promise<BatchResponsePart> {
     // Create mock request/response for batch processing
     const mockReq: any = {
@@ -550,6 +570,7 @@ export class ODataService {
       body,
       query: this.parseQueryString(path),
     };
+    if (this.tenant) TenantScope.setBatchTenant(mockReq, tenantId ?? null);
 
     const responseData: {
       statusCode: number;

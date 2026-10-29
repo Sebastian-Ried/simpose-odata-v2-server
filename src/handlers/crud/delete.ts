@@ -55,7 +55,8 @@ export async function handleDelete(
   keys: Record<string, unknown>,
   schema: ODataSchemaConfig,
   query: ParsedQuery,
-  models: Record<string, any>
+  models: Record<string, any>,
+  sequelize?: any
 ): Promise<void> {
   const odataReq = req as ODataRequest;
   const ctx: HookContext = {
@@ -77,8 +78,8 @@ export async function handleDelete(
     throw new ODataError(405, `${entityName} is read-only`);
   }
 
-  // Check if entity exists
-  const exists = await handler.exists(keys);
+  // Check if entity exists (within the tenant, when tenant isolation is on)
+  const exists = await handler.exists(keys, ctx);
   if (!exists) {
     throw new ODataError(404, `${entityName} not found`);
   }
@@ -97,10 +98,18 @@ export async function handleDelete(
     }
   }
 
+  // beforeDelete and the delete share one transaction (a hook's checks and
+  // the delete are atomic); afterDelete runs once it is committed, so side
+  // effects outside the database (files, caches) never outlive a rollback.
+  const transaction = sequelize ? await sequelize.transaction() : undefined;
   try {
-    await handler.handleDelete(ctx);
+    const txCtx: HookContext = { ...ctx, transaction };
+    await handler.handleDelete(txCtx, { deferAfterDelete: true });
+    await transaction?.commit();
+    await handler.runAfterDelete({ ...ctx });
     res.status(204).send();
   } catch (error) {
+    if (transaction && !(transaction as any).finished) await transaction.rollback();
     if (error instanceof ODataError) {
       throw error;
     }

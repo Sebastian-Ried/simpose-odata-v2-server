@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DefaultHandler = exports.BaseHandler = void 0;
+const errors_1 = require("../utils/errors");
 /**
  * Abstract base class for entity handlers
  * Provides default CRUD implementation that can be overridden
@@ -12,21 +13,52 @@ class BaseHandler {
     queryBuilder;
     sequelize;
     hooks;
-    constructor(model, entityName, schema, queryBuilder, sequelize, hooks) {
+    tenant;
+    constructor(model, entityName, schema, queryBuilder, sequelize, hooks, tenant) {
         this.model = model;
         this.entityName = entityName;
         this.schema = schema;
         this.queryBuilder = queryBuilder;
         this.sequelize = sequelize;
         this.hooks = hooks;
+        this.tenant = tenant;
+    }
+    /** Runs the afterDelete hook (see handleDelete's deferAfterDelete). */
+    async runAfterDelete(ctx) {
+        if (this.hooks?.afterDelete) {
+            await this.hooks.afterDelete(ctx);
+        }
     }
     /**
-     * Check if entity exists
+     * Check if entity exists (within the request's tenant when ctx is given)
      */
-    async exists(keys) {
-        const where = this.queryBuilder.buildKeyWhere(this.entityName, keys);
-        const count = await this.model.count({ where });
+    async exists(keys, ctx) {
+        const where = this.keyWhere(keys, ctx);
+        const count = await this.model.count({ where, transaction: ctx?.transaction });
         return count > 0;
+    }
+    /** The key condition, limited to the request's tenant when ctx is given. */
+    keyWhere(keys, ctx) {
+        const where = this.queryBuilder.buildKeyWhere(this.entityName, keys);
+        if (!this.tenant || !ctx)
+            return where;
+        return this.tenant.where(this.model, this.tenant.resolve(ctx), where);
+    }
+    /** Limits find options to the request's tenant (also every include). */
+    scopeFind(options, ctx) {
+        if (!this.tenant)
+            return options;
+        return this.tenant.scopeFind(this.model, options, this.tenant.resolve(ctx));
+    }
+    /** Tenant rules for a create/update payload (see TenantScope.checkWrite). */
+    async checkTenantWrite(ctx, data, create) {
+        if (!this.tenant)
+            return;
+        await this.tenant.checkWrite(this.model, data, this.tenant.resolve(ctx), {
+            create,
+            transaction: ctx.transaction,
+            entityName: this.entityName,
+        });
     }
     /**
      * Get entity definition
@@ -62,7 +94,7 @@ class DefaultHandler extends BaseHandler {
         }
         // Performance: Use findAndCountAll when count is needed to avoid separate query
         if (ctx.query.$inlinecount === 'allpages') {
-            const options = this.queryBuilder.buildFindOptions(this.entityName, ctx.query);
+            const options = this.scopeFind(this.queryBuilder.buildFindOptions(this.entityName, ctx.query), ctx);
             const { rows, count } = await this.model.findAndCountAll(options);
             // Run afterRead hook
             if (this.hooks?.afterRead) {
@@ -72,7 +104,7 @@ class DefaultHandler extends BaseHandler {
             return { results: rows.map((r) => r.get({ plain: true })), count };
         }
         // No count needed - use simple findAll
-        const options = this.queryBuilder.buildFindOptions(this.entityName, ctx.query);
+        const options = this.scopeFind(this.queryBuilder.buildFindOptions(this.entityName, ctx.query), ctx);
         const results = await this.model.findAll(options);
         // Run afterRead hook
         if (this.hooks?.afterRead) {
@@ -89,7 +121,7 @@ class DefaultHandler extends BaseHandler {
         if (this.hooks?.beforeRead) {
             await this.hooks.beforeRead(ctx);
         }
-        const options = this.queryBuilder.buildFindOneOptions(this.entityName, ctx.keys, ctx.query);
+        const options = this.scopeFind(this.queryBuilder.buildFindOneOptions(this.entityName, ctx.keys, ctx.query), ctx);
         const result = await this.model.findOne(options);
         if (!result) {
             return null;
@@ -108,13 +140,16 @@ class DefaultHandler extends BaseHandler {
         if (this.hooks?.beforeCreate) {
             createData = await this.hooks.beforeCreate(ctx, createData);
         }
-        // Handle deep create (nested entities)
+        // Deep insert is refused: nested entities would be created without their
+        // own hooks (authorization, validation) and outside the tenant rules.
         const { mainData, nestedData } = this.separateNestedData(createData);
+        if (Object.keys(nestedData).length > 0) {
+            throw new errors_1.ODataError(400, 'Deep insert is not supported');
+        }
+        await this.checkTenantWrite(ctx, mainData, true);
         // Create main entity (with transaction if available)
         const createOptions = ctx.transaction ? { transaction: ctx.transaction } : {};
         const result = await this.model.create(mainData, createOptions);
-        // Handle nested creates if any
-        await this.handleNestedCreates(result, nestedData, ctx.transaction);
         let plainResult = result.get({ plain: true });
         // Run afterCreate hook
         if (this.hooks?.afterCreate) {
@@ -131,7 +166,8 @@ class DefaultHandler extends BaseHandler {
         if (this.hooks?.beforeUpdate) {
             updateData = await this.hooks.beforeUpdate(ctx, updateData);
         }
-        const where = this.queryBuilder.buildKeyWhere(this.entityName, ctx.keys);
+        await this.checkTenantWrite(ctx, updateData, false);
+        const where = this.keyWhere(ctx.keys, ctx);
         // Use transaction if available for atomic operation
         const transaction = ctx.transaction;
         const options = transaction ? { where, transaction, lock: true } : { where };
@@ -158,7 +194,8 @@ class DefaultHandler extends BaseHandler {
         if (this.hooks?.beforeUpdate) {
             updateData = await this.hooks.beforeUpdate(ctx, updateData);
         }
-        const where = this.queryBuilder.buildKeyWhere(this.entityName, ctx.keys);
+        await this.checkTenantWrite(ctx, updateData, false);
+        const where = this.keyWhere(ctx.keys, ctx);
         // Use transaction if available for atomic operation
         const transaction = ctx.transaction;
         const options = transaction ? { where, transaction, lock: true } : { where };
@@ -176,7 +213,7 @@ class DefaultHandler extends BaseHandler {
         }
         return plainResult;
     }
-    async handleDelete(ctx) {
+    async handleDelete(ctx, options = {}) {
         if (!ctx.keys) {
             throw new Error('Keys required for delete');
         }
@@ -184,11 +221,10 @@ class DefaultHandler extends BaseHandler {
         if (this.hooks?.beforeDelete) {
             await this.hooks.beforeDelete(ctx);
         }
-        const where = this.queryBuilder.buildKeyWhere(this.entityName, ctx.keys);
-        await this.model.destroy({ where });
-        // Run afterDelete hook
-        if (this.hooks?.afterDelete) {
-            await this.hooks.afterDelete(ctx);
+        const where = this.keyWhere(ctx.keys, ctx);
+        await this.model.destroy({ where, transaction: ctx.transaction });
+        if (!options.deferAfterDelete) {
+            await this.runAfterDelete(ctx);
         }
     }
     /**
@@ -207,35 +243,6 @@ class DefaultHandler extends BaseHandler {
             }
         }
         return { mainData, nestedData };
-    }
-    /**
-     * Handle creation of nested entities (deep create)
-     */
-    async handleNestedCreates(parentInstance, nestedData, transaction) {
-        const entity = this.getEntityDefinition();
-        if (!entity?.navigationProperties) {
-            return;
-        }
-        for (const [navProp, data] of Object.entries(nestedData)) {
-            const navDef = entity.navigationProperties[navProp];
-            if (!navDef || !data) {
-                continue;
-            }
-            // Get the association method
-            const methodName = `create${navProp}`;
-            const createMethod = parentInstance[methodName];
-            if (typeof createMethod === 'function') {
-                const options = transaction ? { transaction } : {};
-                if (Array.isArray(data)) {
-                    for (const item of data) {
-                        await createMethod.call(parentInstance, item, options);
-                    }
-                }
-                else {
-                    await createMethod.call(parentInstance, data, options);
-                }
-            }
-        }
     }
 }
 exports.DefaultHandler = DefaultHandler;

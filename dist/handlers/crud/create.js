@@ -194,10 +194,7 @@ function transformInputData(data, entityName, schema) {
                 transformed[key] = transformInputData(value, navProp.target, schema);
             }
         }
-        else {
-            // Unknown property - pass through
-            transformed[key] = value;
-        }
+        // Unknown properties are dropped: only schema properties are ever written.
     }
     return transformed;
 }

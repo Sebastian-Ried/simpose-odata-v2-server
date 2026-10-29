@@ -12,6 +12,7 @@ const query_options_1 = require("./parser/query-options");
 const read_1 = require("./handlers/crud/read");
 const create_1 = require("./handlers/crud/create");
 const update_1 = require("./handlers/crud/update");
+const tenant_1 = require("./tenant");
 const delete_1 = require("./handlers/crud/delete");
 const metadata_1 = require("./handlers/metadata");
 const batch_1 = require("./handlers/batch");
@@ -31,6 +32,7 @@ class ODataService {
     functionImports;
     basePath;
     verboseErrors;
+    tenant;
     constructor(options) {
         // Load and validate schema
         this.schema = (0, schema_loader_1.loadSchema)(options.schema);
@@ -39,6 +41,7 @@ class ODataService {
         this.basePath = options.basePath || '';
         this.verboseErrors = options.verboseErrors ?? defaults_1.defaults.verboseErrors;
         this.functionImports = options.functionImports || {};
+        this.tenant = options.tenant ? new tenant_1.TenantScope(options.tenant) : undefined;
         // Initialize metadata generator
         this.metadataGenerator = new generator_1.MetadataGenerator(this.schema, this.models, this.basePath);
         // Promote the enriched schema (auto-detected Sequelize attributes included)
@@ -46,6 +49,7 @@ class ODataService {
         // Without this, auto-detected attributes appear in $metadata but are never fetched,
         // causing UI5 OData model warnings like "No data loaded for select property: created_at".
         this.schema = this.metadataGenerator.getEnrichedSchema();
+        this.tenant?.setSchema(this.schema, this.models);
         // Initialize query builder
         this.queryBuilder = new query_builder_1.QueryBuilder(this.schema, this.models, this.sequelize);
         // Initialize hook registry
@@ -74,6 +78,11 @@ class ODataService {
             const hooks = this.hookRegistry.get(entityName);
             // Check for custom handler
             if (customHandlers?.[entityName]) {
+                // A custom handler does its own queries: it can't be held to the
+                // tenant rules, so the combination is refused (fail closed).
+                if (this.tenant?.isScoped(model)) {
+                    throw new Error(`Custom handler for ${entityName} is not allowed with tenant isolation`);
+                }
                 const CustomHandler = customHandlers[entityName];
                 const handler = new CustomHandler();
                 handler.initialize?.(model, entityName, this.schema);
@@ -81,7 +90,7 @@ class ODataService {
             }
             else {
                 // Use default handler
-                const handler = new base_handler_1.DefaultHandler(model, entityName, this.schema, this.queryBuilder, this.sequelize, hooks);
+                const handler = new base_handler_1.DefaultHandler(model, entityName, this.schema, this.queryBuilder, this.sequelize, hooks, this.tenant);
                 this.handlers.set(entityName, handler);
             }
         }
@@ -200,7 +209,7 @@ class ODataService {
                 await (0, update_1.handleMerge)(req, res, handler, entityName, keys, this.schema, query, this.basePath, this.models, this.sequelize);
                 break;
             case 'DELETE':
-                await (0, delete_1.handleDelete)(req, res, handler, entityName, keys, this.schema, query, this.models);
+                await (0, delete_1.handleDelete)(req, res, handler, entityName, keys, this.schema, query, this.models, this.sequelize);
                 break;
             default:
                 throw new errors_1.ODataError(405, `Method ${req.method} not allowed`);
@@ -232,10 +241,10 @@ class ODataService {
         const targetKeys = segments[0].keys;
         switch (req.method) {
             case 'POST':
-                await (0, update_1.handleCreateLink)(req, res, handler, entityName, keys, navigationProperty, this.schema, this.models, this.sequelize);
+                await (0, update_1.handleCreateLink)(req, res, entityName, keys, navigationProperty, this.schema, query, this.models, this.sequelize, Object.fromEntries(this.handlers));
                 break;
             case 'DELETE':
-                await (0, update_1.handleDeleteLink)(req, res, handler, entityName, keys, navigationProperty, targetKeys, this.schema, this.models);
+                await (0, update_1.handleDeleteLink)(req, res, entityName, keys, navigationProperty, targetKeys, this.schema, query, this.models, this.sequelize, Object.fromEntries(this.handlers));
                 break;
             default:
                 throw new errors_1.ODataError(405, `Method ${req.method} not allowed on $links`);
@@ -256,14 +265,18 @@ class ODataService {
      * Handle batch request
      */
     async handleBatchRequest(req, res) {
+        // Batch parts run on mock requests built from the part's own headers: the
+        // tenant is resolved once from the outer (authenticated) request instead,
+        // so a part can never choose its tenant. No tenant → every part is 403.
+        const tenantId = this.tenant?.resolveRequest(req);
         await (0, batch_1.handleBatch)(req, res, this.schema, this.basePath, async (method, path, headers, body, contentId) => {
-            return this.processBatchPart(method, path, headers, body, contentId);
+            return this.processBatchPart(method, path, headers, body, contentId, tenantId);
         }, this.sequelize);
     }
     /**
      * Process a single batch part
      */
-    async processBatchPart(method, path, headers, body, contentId) {
+    async processBatchPart(method, path, headers, body, contentId, tenantId) {
         // Create mock request/response for batch processing
         const mockReq = {
             method,
@@ -273,6 +286,8 @@ class ODataService {
             body,
             query: this.parseQueryString(path),
         };
+        if (this.tenant)
+            tenant_1.TenantScope.setBatchTenant(mockReq, tenantId ?? null);
         const responseData = {
             statusCode: 200,
             headers: {},

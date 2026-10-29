@@ -15,6 +15,7 @@ export declare class ODataService {
     private functionImports;
     private basePath;
     private verboseErrors;
+    private tenant?;
     constructor(options: ODataMiddlewareOptions);
     /**
      * Initialize entity handlers

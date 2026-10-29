@@ -260,6 +260,23 @@ export interface ODataMiddlewareOptions {
     logRequests?: boolean;
     /** CSRF protection options (enabled by default) */
     csrf?: CsrfOptions;
+    /**
+     * Row-level tenant isolation. When set, every model with `attribute` is
+     * limited to the tenant `resolve` returns for the request: reads (also
+     * every $expand/$filter/$orderby join), updates and deletes only see its
+     * rows, creates get it, and belongs-to foreign keys written must reference
+     * rows of the same tenant. `resolve` returning nothing is 403.
+     */
+    tenant?: TenantOptions;
+}
+/**
+ * Tenant isolation options (see ODataMiddlewareOptions.tenant)
+ */
+export interface TenantOptions {
+    /** Model attribute holding the tenant id (e.g. 'clientId') */
+    attribute: string;
+    /** The request's tenant id; called after the consumer's own middleware */
+    resolve: (req: import('express').Request) => string | number | null | undefined;
 }
 /**
  * Abstract base class for entity handlers

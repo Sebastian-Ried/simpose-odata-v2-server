@@ -35,7 +35,7 @@ const etag_1 = require("../../utils/etag");
  * Response: 204 No Content
  * ```
  */
-async function handleDelete(req, res, handler, entityName, keys, schema, query, models) {
+async function handleDelete(req, res, handler, entityName, keys, schema, query, models, sequelize) {
     const odataReq = req;
     const ctx = {
         req: req,
@@ -54,8 +54,8 @@ async function handleDelete(req, res, handler, entityName, keys, schema, query, 
     if (entity?.readOnly) {
         throw new errors_1.ODataError(405, `${entityName} is read-only`);
     }
-    // Check if entity exists
-    const exists = await handler.exists(keys);
+    // Check if entity exists (within the tenant, when tenant isolation is on)
+    const exists = await handler.exists(keys, ctx);
     if (!exists) {
         throw new errors_1.ODataError(404, `${entityName} not found`);
     }
@@ -72,11 +72,20 @@ async function handleDelete(req, res, handler, entityName, keys, schema, query, 
             }
         }
     }
+    // beforeDelete and the delete share one transaction (a hook's checks and
+    // the delete are atomic); afterDelete runs once it is committed, so side
+    // effects outside the database (files, caches) never outlive a rollback.
+    const transaction = sequelize ? await sequelize.transaction() : undefined;
     try {
-        await handler.handleDelete(ctx);
+        const txCtx = { ...ctx, transaction };
+        await handler.handleDelete(txCtx, { deferAfterDelete: true });
+        await transaction?.commit();
+        await handler.runAfterDelete({ ...ctx });
         res.status(204).send();
     }
     catch (error) {
+        if (transaction && !transaction.finished)
+            await transaction.rollback();
         if (error instanceof errors_1.ODataError) {
             throw error;
         }

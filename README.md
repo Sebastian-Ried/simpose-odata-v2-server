@@ -141,6 +141,30 @@ const hooks = {
 app.use('/odata', odataMiddleware({ schema, sequelize, hooks }));
 ```
 
+### Tenant Isolation
+
+A hook filter only covers the top-level read. For multi-tenant data use the
+`tenant` option instead: the middleware then limits every model that has the
+tenant attribute to the request's tenant — reads, every `$expand`, `$filter`
+and `$orderby` join, updates and deletes (a key that exists in several tenants
+only touches the request tenant's row). Creates get the tenant, a payload
+naming another tenant is 403, and every belongs-to foreign key written must
+reference a row of the same tenant (404 otherwise). Models without the
+attribute are not scoped. `resolve` returning nothing is 403.
+
+```javascript
+app.use('/odata', odataMiddleware({
+  schema, sequelize, hooks,
+  // req.tenantId comes from your own (authenticated) middleware
+  tenant: { attribute: 'tenantId', resolve: (req) => req.tenantId },
+}));
+```
+
+Function imports run your own code and are not scoped; custom handlers for
+scoped models are refused at startup. Only schema properties
+are written (unknown payload properties are dropped), and deep insert is
+refused with 400 (nested entities would bypass their hooks).
+
 ### Function Imports
 
 ```javascript

@@ -40,7 +40,8 @@
  */
 export { odataMiddleware, createODataService, enableMergeMethod } from './middleware';
 export { ODataService } from './ODataService';
-export { ODataSchemaConfig, EntityDefinition, PropertyDefinition, NavigationPropertyDefinition, AssociationDefinition, FunctionImportDefinition, ODataMiddlewareOptions, HookContext, ParsedQuery, EntityHooks, FunctionImportHandler, EdmType, Multiplicity, EntityHandler, Logger, CsrfOptions, } from './config/types';
+export { TenantScope } from './tenant';
+export { ODataSchemaConfig, EntityDefinition, PropertyDefinition, NavigationPropertyDefinition, AssociationDefinition, FunctionImportDefinition, ODataMiddlewareOptions, HookContext, ParsedQuery, EntityHooks, FunctionImportHandler, EdmType, Multiplicity, EntityHandler, Logger, CsrfOptions, TenantOptions, } from './config/types';
 export { loadSchema, inferSchemaFromModels, SchemaValidationError } from './config/schema-loader';
 export { defaults, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, ODATA_VERSION } from './config/defaults';
 export { MetadataGenerator } from './metadata/generator';

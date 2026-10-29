@@ -12,9 +12,9 @@ export declare function handleMerge(req: Request, res: Response, handler: BaseHa
 /**
  * Handle link creation (POST to $links)
  */
-export declare function handleCreateLink(req: Request, res: Response, handler: BaseHandler, entityName: string, keys: Record<string, unknown>, navigationProperty: string, schema: ODataSchemaConfig, models: Record<string, any>, sequelize: any): Promise<void>;
+export declare function handleCreateLink(req: Request, res: Response, entityName: string, keys: Record<string, unknown>, navigationProperty: string, schema: ODataSchemaConfig, query: ParsedQuery, models: Record<string, any>, sequelize: any, handlers: Record<string, BaseHandler>): Promise<void>;
 /**
  * Handle link deletion (DELETE to $links)
  */
-export declare function handleDeleteLink(req: Request, res: Response, handler: BaseHandler, entityName: string, keys: Record<string, unknown>, navigationProperty: string, targetKeys: Record<string, unknown> | undefined, schema: ODataSchemaConfig, models: Record<string, any>): Promise<void>;
+export declare function handleDeleteLink(req: Request, res: Response, entityName: string, keys: Record<string, unknown>, navigationProperty: string, targetKeys: Record<string, unknown> | undefined, schema: ODataSchemaConfig, query: ParsedQuery, models: Record<string, any>, sequelize: any, handlers: Record<string, BaseHandler>): Promise<void>;
 //# sourceMappingURL=update.d.ts.map

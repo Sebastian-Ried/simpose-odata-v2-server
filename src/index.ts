@@ -42,6 +42,7 @@
 // Main exports
 export { odataMiddleware, createODataService, enableMergeMethod } from './middleware';
 export { ODataService } from './ODataService';
+export { TenantScope } from './tenant';
 
 // Types
 export {
@@ -61,6 +62,7 @@ export {
   EntityHandler,
   Logger,
   CsrfOptions,
+  TenantOptions,
 } from './config/types';
 
 // Configuration

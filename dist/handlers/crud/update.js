@@ -147,9 +147,48 @@ async function handleMerge(req, res, handler, entityName, keys, schema, query, b
     }
 }
 /**
+ * Sets one foreign key through the owning entity's handler: its beforeUpdate/
+ * afterUpdate hooks, tenant rules and transaction apply as for a MERGE.
+ */
+async function updateForeignKey(req, entityName, keys, data, query, models, sequelize, handlers) {
+    const handler = handlers[entityName];
+    if (!handler) {
+        throw new errors_1.ODataError(404, `Entity ${entityName} not found`);
+    }
+    const odataReq = req;
+    const transaction = await sequelize.transaction();
+    try {
+        const ctx = {
+            req: req,
+            res: undefined,
+            query,
+            entityName,
+            models,
+            user: req.user,
+            keys,
+            data: {},
+            transaction,
+            correlationId: odataReq.correlationId,
+            logger: odataReq.logger,
+        };
+        const result = await handler.handleMerge(ctx, data);
+        if (result === null) {
+            throw new errors_1.ODataError(404, `${entityName} not found`);
+        }
+        await transaction.commit();
+    }
+    catch (error) {
+        await transaction.rollback();
+        if (error instanceof errors_1.ODataError) {
+            throw error;
+        }
+        throw new errors_1.ODataError(500, `Error updating ${entityName}`, error);
+    }
+}
+/**
  * Handle link creation (POST to $links)
  */
-async function handleCreateLink(req, res, handler, entityName, keys, navigationProperty, schema, models, sequelize) {
+async function handleCreateLink(req, res, entityName, keys, navigationProperty, schema, query, models, sequelize, handlers) {
     const body = req.body;
     if (!body || !body.uri) {
         throw new errors_1.ODataError(400, 'Request body must contain uri property');
@@ -160,8 +199,7 @@ async function handleCreateLink(req, res, handler, entityName, keys, navigationP
         throw new errors_1.ODataError(404, `Navigation property ${navigationProperty} not found`);
     }
     // Parse the URI to get target entity keys
-    const targetUri = body.uri;
-    const targetKeys = parseEntityUri(targetUri, navProp.target, schema);
+    const targetKeys = parseEntityUri(body.uri, navProp.target, schema);
     if (!targetKeys) {
         throw new errors_1.ODataError(400, 'Invalid target entity URI');
     }
@@ -171,28 +209,20 @@ async function handleCreateLink(req, res, handler, entityName, keys, navigationP
         throw new errors_1.ODataError(400, 'Cannot create link for this navigation property');
     }
     const { principal, dependent } = association.referentialConstraint;
-    // Determine which entity to update
     if (dependent.entity === entityName) {
-        // Update this entity's foreign key
-        const model = models[entity?.model || entityName];
-        const where = {};
-        for (const key of entity?.keys || []) {
-            where[key] = keys[key];
-        }
-        await model.update({ [dependent.property]: targetKeys[principal.property] }, { where });
+        // This entity holds the foreign key
+        await updateForeignKey(req, entityName, keys, { [dependent.property]: targetKeys[principal.property] }, query, models, sequelize, handlers);
     }
     else {
-        // Update target entity's foreign key
-        const targetEntity = schema.entities[navProp.target];
-        const model = models[targetEntity?.model || navProp.target];
-        await model.update({ [dependent.property]: keys[principal.property] }, { where: targetKeys });
+        // The target entity holds the foreign key
+        await updateForeignKey(req, navProp.target, targetKeys, { [dependent.property]: keys[principal.property] }, query, models, sequelize, handlers);
     }
     res.status(204).send();
 }
 /**
  * Handle link deletion (DELETE to $links)
  */
-async function handleDeleteLink(req, res, handler, entityName, keys, navigationProperty, targetKeys, schema, models) {
+async function handleDeleteLink(req, res, entityName, keys, navigationProperty, targetKeys, schema, query, models, sequelize, handlers) {
     const entity = schema.entities[entityName];
     const navProp = entity?.navigationProperties?.[navigationProperty];
     if (!navProp) {
@@ -202,20 +232,13 @@ async function handleDeleteLink(req, res, handler, entityName, keys, navigationP
     if (!association?.referentialConstraint) {
         throw new errors_1.ODataError(400, 'Cannot delete link for this navigation property');
     }
-    const { principal, dependent } = association.referentialConstraint;
+    const { dependent } = association.referentialConstraint;
     // Set foreign key to null
     if (dependent.entity === entityName) {
-        const model = models[entity?.model || entityName];
-        const where = {};
-        for (const key of entity?.keys || []) {
-            where[key] = keys[key];
-        }
-        await model.update({ [dependent.property]: null }, { where });
+        await updateForeignKey(req, entityName, keys, { [dependent.property]: null }, query, models, sequelize, handlers);
     }
     else if (targetKeys) {
-        const targetEntity = schema.entities[navProp.target];
-        const model = models[targetEntity?.model || navProp.target];
-        await model.update({ [dependent.property]: null }, { where: targetKeys });
+        await updateForeignKey(req, navProp.target, targetKeys, { [dependent.property]: null }, query, models, sequelize, handlers);
     }
     res.status(204).send();
 }
@@ -241,10 +264,8 @@ function transformUpdateData(data, entityName, schema) {
         if (propDef) {
             transformed[propDef.column || key] = transformValue(value, propDef.type);
         }
-        else if (!entity.navigationProperties?.[key]) {
-            // Unknown property that's not a navigation - pass through
-            transformed[key] = value;
-        }
+        // Anything else (unknown properties, navigation properties) is dropped:
+        // only schema properties are ever written.
     }
     return transformed;
 }

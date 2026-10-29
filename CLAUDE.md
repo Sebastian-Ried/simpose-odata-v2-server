@@ -20,7 +20,7 @@ const { odataMiddleware } = require('odata-v2-sequelize');
 app.use("/service/api", odataMiddleware({ schema, sequelize, hooks, customHandlers }));
 ```
 
-Installed via git URL: `"odata-v2-sequelize": "github:Sebastian-Ried/simpose-odata-v2-server#v1.0.0"`
+Installed via git URL: `"odata-v2-sequelize": "github:Sebastian-Ried/simpose-odata-v2-server#<tag or commit>"`
 
 ## Key Files
 
@@ -37,6 +37,7 @@ Installed via git URL: `"odata-v2-sequelize": "github:Sebastian-Ried/simpose-oda
 | `src/handlers/crud/delete.ts` | DELETE handler — validates `If-Match` ETag |
 | `src/handlers/function-import.ts` | Custom server-side operations |
 | `src/serializers/json-serializer.ts` | OData JSON response formatting (ETag only for complete entities, not `$select`) |
+| `src/tenant.ts` | `tenant` option — row-level tenant isolation for reads, joins, writes and foreign keys |
 | `src/hooks/context.ts` | `addQueryFilter()`, `getModel()`, `getUser()` — hook context utilities |
 
 ## OData Schema Structure
@@ -108,6 +109,23 @@ Hooks that never touch `ctx.transaction` are unaffected — this is backward com
 
 `$batch` changesets no longer wrap themselves in an outer transaction either (that wrapper never actually reached the request handlers doing the writes — confirmed non-functional, and it would now conflict with the per-request transaction above: two real transactions on the same pooled connection). Each request inside a changeset is atomic on its own; a failing part still stops the changeset and reports every part as failed, but an earlier part's already-committed write can no longer be undone by a later failure (it never actually could, despite the response claiming a "rollback").
 
+## Tenant Isolation (`tenant` option, v1.2.0+)
+
+`odataMiddleware({ ..., tenant: { attribute: 'clientId', resolve: (req) => req.aclContext?.clientId } })`
+limits every model that has `attribute` to the request's tenant (`TenantScope` in `src/tenant.ts`,
+applied by `DefaultHandler`):
+
+- reads: root `where` and every include (`$expand`, `$filter`/`$orderby` auto-includes, navigation reads) get `attribute = tenant`; includes stay LEFT JOINs (`required: false` unless set)
+- update/merge/delete: the key `where` includes the tenant, so a key that exists in several tenants only touches the request tenant's row; no row → 404
+- create/update payloads: another tenant → 403 (create sets it, update drops it); every foreign key in the payload (`BelongsTo` association or schema `referentialConstraint`) must point at a row of the tenant → 404
+- `resolve` returning nothing → 403. `$batch` parts get the tenant resolved from the outer request (a part's own headers never choose it). Function imports are not scoped; a custom handler for a scoped model is refused at startup
+
+Also since v1.2.0, for every consumer: payload properties not in the (enriched) schema are dropped,
+deep insert is refused (400 — nested creates bypassed their hooks; they never worked anyway because of
+the accessor naming), DELETE runs `beforeDelete` + the delete in one transaction and `afterDelete` after
+the commit, and `$links` writes (not routed today: the parser reads `$links` as a navigation segment)
+go through the target entity's `handleMerge`.
+
 ## Navigation Property Filtering
 
 The middleware supports `$filter=navProp/field eq value` syntax. Internally:
@@ -123,7 +141,7 @@ The middleware supports `$filter=navProp/field eq value` syntax. Internally:
 ```bash
 npm install           # install deps
 npm run build         # TypeScript → dist/
-npm test              # 549 tests
+npm test              # 588 tests
 npm run dev           # watch mode
 ```
 
@@ -132,5 +150,5 @@ After changes: rebuild (`npm run build`), commit dist/, tag, push. Consumers upd
 ## Testing
 
 - Tests use SQLite in-memory (no external DB needed)
-- `vitest` framework, 23 test files, 549 tests
+- `vitest` framework, 26 test files, 588 tests
 - Note: `iLike` (case-insensitive LIKE) is not supported by SQLite — string function tests accept both 200 and 500
