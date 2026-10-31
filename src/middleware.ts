@@ -11,6 +11,9 @@ import { createCsrfProtection, DEFAULT_CSRF_HEADER } from './utils/csrf';
 /** Maximum body size for requests (10MB) */
 const MAX_BODY_SIZE = 10 * 1024 * 1024;
 
+// Methods a POST may tunnel via X-HTTP-Method / X-HTTP-Method-Override
+const TUNNELLED_METHODS = new Set(['GET', 'PUT', 'PATCH', 'MERGE', 'DELETE']);
+
 /** Request with OData extensions */
 interface ODataRequest extends Request {
   _odataMerge?: boolean;
@@ -121,14 +124,18 @@ export function odataMiddleware(options: ODataMiddlewareOptions): Router {
   });
 
   // OData method tunneling: POST with X-HTTP-Method header overrides req.method
-  // (standard OData V2 pattern used by SAP UI5 when useBatch is false)
+  // (standard OData V2 pattern used by SAP UI5 when useBatch is false). Only
+  // the OData methods are accepted; any other value leaves the request a POST.
   router.use((req: ODataRequest, res: Response, next: NextFunction) => {
     if (req.method === 'POST') {
       const methodOverride =
         (req.headers['x-http-method'] as string) ||
         (req.headers['x-http-method-override'] as string);
       if (methodOverride) {
-        req.method = methodOverride.toUpperCase();
+        const method = String(methodOverride).toUpperCase();
+        if (TUNNELLED_METHODS.has(method)) {
+          req.method = method;
+        }
       }
     }
     next();

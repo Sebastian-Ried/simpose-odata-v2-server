@@ -113,9 +113,14 @@ class ODataService {
         // Parse URI
         const segments = (0, uri_parser_1.parseUri)(path, this.schema);
         // Handle empty path (service document)
-        if (segments.length === 0 || path === '/') {
+        if (path === '/' || path === '') {
             await (0, metadata_1.handleServiceDocument)(req, res, this.schema, this.basePath);
             return;
+        }
+        // A path the parser recognises nothing of (an unknown entity set or
+        // function import) names no resource
+        if (segments.length === 0) {
+            throw new errors_1.ODataError(404, `Resource not found: ${path}`);
         }
         // Parse query options
         const queryOptions = (0, query_options_1.parseQueryOptions)(req.query);
@@ -277,10 +282,13 @@ class ODataService {
      * Process a single batch part
      */
     async processBatchPart(method, path, headers, body, contentId, tenantId) {
-        // Create mock request/response for batch processing
+        // Create mock request/response for batch processing. A part's URL is
+        // relative to the service root and may carry a query string; the path the
+        // URI parser sees is the resource alone, like req.path of a plain request.
+        const resource = path.split('?')[0];
         const mockReq = {
             method,
-            path,
+            path: resource.startsWith('/') ? resource : `/${resource}`,
             url: path,
             headers,
             body,

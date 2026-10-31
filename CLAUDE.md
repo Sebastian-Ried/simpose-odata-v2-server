@@ -127,6 +127,11 @@ the accessor naming), DELETE runs `beforeDelete` + the delete in one transaction
 the commit, and `$links` writes (not routed today: the parser reads `$links` as a navigation segment)
 go through the target entity's `handleMerge`.
 
+Since v1.3.1: `X-HTTP-Method` / `X-HTTP-Method-Override` on a POST switch only to GET, PUT, PATCH,
+MERGE or DELETE (any other value leaves the request a POST); an unknown first path segment is 404, not
+the service document; a `$batch` part's query string (`Product?$top=1`) reaches the part as `req.query`,
+its path without it.
+
 ## Navigation Property Filtering
 
 The middleware supports `$filter=navProp/field eq value` syntax. Internally:
@@ -142,7 +147,7 @@ The middleware supports `$filter=navProp/field eq value` syntax. Internally:
 ```bash
 npm install           # install deps
 npm run build         # TypeScript → dist/
-npm test              # 589 tests
+npm test              # 596 tests
 npm run dev           # watch mode
 ```
 
@@ -151,5 +156,5 @@ After changes: rebuild (`npm run build`), commit dist/, tag, push. Consumers upd
 ## Testing
 
 - Tests use SQLite in-memory (no external DB needed)
-- `vitest` framework, 26 test files, 589 tests
+- `vitest` framework, 27 test files, 596 tests (3 skipped)
 - Note: `iLike` (case-insensitive LIKE) is not supported by SQLite — string function tests accept both 200 and 500

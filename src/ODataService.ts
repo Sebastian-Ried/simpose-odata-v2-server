@@ -156,9 +156,15 @@ export class ODataService {
     const segments = parseUri(path, this.schema);
 
     // Handle empty path (service document)
-    if (segments.length === 0 || path === '/') {
+    if (path === '/' || path === '') {
       await handleServiceDocument(req, res, this.schema, this.basePath);
       return;
+    }
+
+    // A path the parser recognises nothing of (an unknown entity set or
+    // function import) names no resource
+    if (segments.length === 0) {
+      throw new ODataError(404, `Resource not found: ${path}`);
     }
 
     // Parse query options
@@ -561,10 +567,13 @@ export class ODataService {
     contentId?: string,
     tenantId?: string | number | null
   ): Promise<BatchResponsePart> {
-    // Create mock request/response for batch processing
+    // Create mock request/response for batch processing. A part's URL is
+    // relative to the service root and may carry a query string; the path the
+    // URI parser sees is the resource alone, like req.path of a plain request.
+    const resource = path.split('?')[0]!;
     const mockReq: any = {
       method,
-      path,
+      path: resource.startsWith('/') ? resource : `/${resource}`,
       url: path,
       headers,
       body,
