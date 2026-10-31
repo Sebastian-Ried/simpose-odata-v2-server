@@ -22,7 +22,7 @@ A production-ready OData V2 middleware for Express.js with Sequelize ORM integra
 npm install github:Sebastian-Ried/simpose-odata-v2-server#v1.0.0
 ```
 
-Requires `express` and `sequelize` as peer dependencies in your project.
+Requires `express` (4.18+ or 5.x) and `sequelize` (6.x) as peer dependencies in your project.
 
 ## Quick Start
 

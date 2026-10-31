@@ -280,8 +280,10 @@ export function odataMiddleware(options: ODataMiddlewareOptions): Router {
   // Content negotiation
   router.use(contentNegotiation);
 
-  // Main request handler
-  router.all('*', async (req: ODataRequest, res: Response, next: NextFunction) => {
+  // Main request handler. A path-less `use` takes every path and leaves
+  // req.path/req.url untouched on Express 4 and 5 alike; Express 5's
+  // path-to-regexp rejects the bare `'*'` route pattern Express 4 accepted.
+  router.use(async (req: ODataRequest, res: Response, next: NextFunction) => {
     try {
       await service.processRequest(req, res);
 
@@ -336,8 +338,9 @@ export function odataMiddleware(options: ODataMiddlewareOptions): Router {
  *   models: { Product }
  * });
  *
- * // Use with custom routing
- * app.all('/api/v1/*', async (req, res, next) => {
+ * // Use with custom routing (a path-less handler under a mount point works
+ * // on Express 4 and 5; Express 5 spells a wildcard route '/{*splat}')
+ * app.use('/api/v1', async (req, res, next) => {
  *   try {
  *     await service.processRequest(req, res);
  *   } catch (error) {

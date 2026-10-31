@@ -132,6 +132,15 @@ MERGE or DELETE (any other value leaves the request a POST); an unknown first pa
 the service document; a `$batch` part's query string (`Product?$top=1`) reaches the part as `req.query`,
 its path without it.
 
+Since v1.4.0 the peer range is Express `^4.18.0 || ^5.0.0`: the catch-all is a path-less `router.use`
+(Express 5's path-to-regexp 8 rejects the bare `'*'` route), nothing else of the Express surface the
+library touches (`req.path`/`query`/`body`/`headers`, `res.status`/`setHeader`/`type`, `Router`) changed
+between the majors. The dev dependency and the suite run on Express 5; before a release also run the
+suite once with `npm install --no-save express@^4.22.3 @types/express@^4` and restore with `npm ci`.
+Consumers on Express 4 need no change; on Express 5 remember the simple query parser (`?a[b]=c` is no
+longer nested — OData options are flat anyway) and that unhandled promise rejections in route handlers
+reach the error handler on their own.
+
 ## Navigation Property Filtering
 
 The middleware supports `$filter=navProp/field eq value` syntax. Internally:

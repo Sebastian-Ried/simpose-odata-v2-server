@@ -74,8 +74,9 @@ export declare function odataMiddleware(options: ODataMiddlewareOptions): Router
  *   models: { Product }
  * });
  *
- * // Use with custom routing
- * app.all('/api/v1/*', async (req, res, next) => {
+ * // Use with custom routing (a path-less handler under a mount point works
+ * // on Express 4 and 5; Express 5 spells a wildcard route '/{*splat}')
+ * app.use('/api/v1', async (req, res, next) => {
  *   try {
  *     await service.processRequest(req, res);
  *   } catch (error) {
